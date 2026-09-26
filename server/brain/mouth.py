@@ -273,7 +273,9 @@ def _synthesize_builtin(text: str) -> bytes:
         if sys.platform == "darwin":
             cmd = ["say", "-v", config.TTS_FALLBACK_VOICE, "-o", path, "--data-format=LEI16@16000"]
         elif sys.platform == "win32":
-            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", _WINDOWS_TTS, path]
+            # -Command does not put trailing argv into $args; embed the path.
+            script = _WINDOWS_TTS.replace("$args[0]", json.dumps(path))
+            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
         elif shutil.which("espeak-ng") or shutil.which("espeak"):
             cmd = [shutil.which("espeak-ng") or "espeak", "--stdin", "-w", path]
         else:
