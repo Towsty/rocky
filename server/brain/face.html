@@ -5,263 +5,379 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rocky</title>
 <style>
-  :root {
-    --bg0: #1a2332;
-    --bg1: #243044;
-    --shell: #c8d0dc;
-    --shell-dark: #8a94a4;
-    --cheek: #e8a090;
-    --line: #2a3344;
-    --said: #d8e0ec;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
-    height: 100%;
+    margin: 0; padding: 0; width: 100%; height: 100%;
     overflow: hidden;
-    background: radial-gradient(120% 90% at 50% 20%, var(--bg1), var(--bg0));
+    background: transparent !important;
     font-family: "Segoe UI", system-ui, sans-serif;
-    color: var(--said);
     user-select: none;
+    -webkit-user-select: none;
   }
   #stage {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: clamp(0.5rem, 2vh, 1.25rem);
-    padding: 2vh 3vw;
+    position: relative;
+    width: 100%; height: 100%;
+    background: transparent;
   }
-  #robot {
-    width: min(78vmin, 520px);
-    height: auto;
-    filter: drop-shadow(0 18px 40px rgba(0,0,0,.45));
+  #c {
+    display: block;
+    width: 100%; height: 100%;
+    background: transparent;
   }
-  #said {
-    max-width: min(78vmin, 520px);
-    min-height: 1.4em;
-    text-align: center;
-    font-size: clamp(0.95rem, 2.4vmin, 1.25rem);
+  #bubble {
+    display: none;
+    position: absolute;
+    left: 8px; right: 8px; top: 8px;
+    max-height: 42%;
+    padding: 8px 10px;
+    border-radius: 12px;
+    background: rgba(20, 28, 40, 0.92);
+    color: #e8eef8;
+    font-size: 12px;
     line-height: 1.35;
-    opacity: 0.92;
-    letter-spacing: 0.01em;
+    box-shadow: 0 6px 18px rgba(0,0,0,.35);
+    overflow: auto;
+    pointer-events: auto;
+    z-index: 2;
   }
-  #said:empty { opacity: 0; }
-
-  /* emotion palette + expression hooks */
-  #head { fill: var(--shell); stroke: var(--line); stroke-width: 3; }
-  #visor { fill: #1e2838; stroke: var(--line); stroke-width: 2.5; }
-  .eye-white { fill: #f4f7fb; }
-  .pupil { fill: #1a2030; }
-  .lid {
-    fill: var(--shell);
-    transform-origin: center;
-    transition: transform 120ms ease;
+  #bubble.show { display: block; }
+  #menu {
+    display: none;
+    position: absolute;
+    min-width: 140px;
+    padding: 4px;
+    border-radius: 10px;
+    background: rgba(22, 30, 42, 0.96);
+    color: #e8eef8;
+    font-size: 12px;
+    box-shadow: 0 8px 22px rgba(0,0,0,.4);
+    z-index: 3;
+    pointer-events: auto;
   }
-  #mouth {
-    fill: none;
-    stroke: var(--line);
-    stroke-width: 5;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    transition: d 160ms ease;
+  #menu.show { display: block; }
+  #menu button {
+    display: block; width: 100%;
+    border: 0; background: transparent; color: inherit;
+    text-align: left; padding: 7px 10px; border-radius: 7px;
+    cursor: pointer; font: inherit;
   }
-  #cheeks { opacity: 0; transition: opacity 200ms ease; }
-  .cheek { fill: var(--cheek); }
-
-  /* gaze drift (applied to pupils group) */
-  #gaze { transition: transform 600ms ease; }
-
-  body.asleep #lids { transform: scaleY(1); }
-  body:not(.asleep) #lids.blink { transform: scaleY(1); }
-
-  #lids {
-    transform-box: fill-box;
-    transform-origin: center;
-    transform: scaleY(0.08);
-    transition: transform 90ms ease-in;
-  }
+  #menu button:hover { background: rgba(110, 198, 255, 0.18); }
 </style>
 </head>
-<body class="asleep">
+<body>
   <div id="stage">
-    <svg id="robot" viewBox="0 0 400 420" aria-label="Rocky">
-      <!-- antenna -->
-      <line x1="200" y1="38" x2="200" y2="70" stroke="#8a94a4" stroke-width="6" stroke-linecap="round"/>
-      <circle cx="200" cy="28" r="12" fill="#6ec6ff" stroke="#2a3344" stroke-width="2" id="antenna"/>
-
-      <!-- head shell -->
-      <rect id="head" x="55" y="70" width="290" height="280" rx="78" ry="78"/>
-
-      <!-- ear pips -->
-      <rect x="28" y="170" width="28" height="70" rx="12" fill="#9aa5b5" stroke="#2a3344" stroke-width="2"/>
-      <rect x="344" y="170" width="28" height="70" rx="12" fill="#9aa5b5" stroke="#2a3344" stroke-width="2"/>
-
-      <!-- visor / face plate -->
-      <rect id="visor" x="85" y="115" width="230" height="160" rx="36"/>
-
-      <g id="cheeks">
-        <ellipse class="cheek" cx="120" cy="230" rx="18" ry="10"/>
-        <ellipse class="cheek" cx="280" cy="230" rx="18" ry="10"/>
-      </g>
-
-      <!-- eyes -->
-      <g id="eyes">
-        <g id="gaze">
-          <ellipse class="eye-white" id="eyeL" cx="145" cy="175" rx="28" ry="32"/>
-          <ellipse class="eye-white" id="eyeR" cx="255" cy="175" rx="28" ry="32"/>
-          <circle class="pupil" id="pupilL" cx="145" cy="178" r="12"/>
-          <circle class="pupil" id="pupilR" cx="255" cy="178" r="12"/>
-          <circle fill="#fff" cx="140" cy="172" r="3.5" opacity=".85"/>
-          <circle fill="#fff" cx="250" cy="172" r="3.5" opacity=".85"/>
-        </g>
-        <!-- lids sit on top; scaleY closed when asleep / blink -->
-        <g id="lids">
-          <rect x="114" y="142" width="62" height="66" rx="20" fill="#c8d0dc"/>
-          <rect x="224" y="142" width="62" height="66" rx="20" fill="#c8d0dc"/>
-        </g>
-      </g>
-
-      <!-- mouth path swapped per emotion / speaking -->
-      <path id="mouth" d="M155 255 Q200 268 245 255"/>
-    </svg>
-    <p id="said" aria-live="polite"></p>
+    <div id="bubble" aria-live="polite"></div>
+    <div id="menu" role="menu">
+      <button type="button" data-act="sleep">Sleep</button>
+      <button type="button" data-act="listen">Listen</button>
+      <button type="button" data-act="console">Open console</button>
+      <button type="button" data-act="quit">Quit face</button>
+    </div>
+    <canvas id="c"></canvas>
   </div>
-<script>
-(function () {
-  const EMOTIONS = new Set(["neutral","happy","sad","angry","surprised","sleepy","thinking"]);
-  const mouth = document.getElementById("mouth");
-  const lids = document.getElementById("lids");
-  const gaze = document.getElementById("gaze");
-  const cheeks = document.getElementById("cheeks");
-  const antenna = document.getElementById("antenna");
-  const said = document.getElementById("said");
-  const pupilL = document.getElementById("pupilL");
-  const pupilR = document.getElementById("pupilR");
-  const eyeL = document.getElementById("eyeL");
-  const eyeR = document.getElementById("eyeR");
-
-  const MOUTHS = {
-    neutral:   "M155 255 Q200 268 245 255",
-    happy:     "M150 250 Q200 285 250 250",
-    sad:       "M150 270 Q200 245 250 270",
-    angry:     "M155 260 L245 260",
-    surprised: "M185 248 Q200 278 215 248 Q200 278 185 248",
-    sleepy:    "M160 258 Q200 262 240 258",
-    thinking:  "M165 255 Q210 272 245 252",
-  };
-  const SPEAK = [
-    "M160 255 Q200 250 240 255",
-    "M158 255 Q200 275 242 255",
-    "M162 255 Q200 262 238 255",
-    "M155 255 Q200 282 245 255",
-  ];
-
-  let state = {
-    emotion: "sleepy",
-    awake: false,
-    listening: false,
-    speaking: false,
-    last_said: "",
-    last_heard: "",
-  };
-  let speakIdx = 0;
-  let blinkTimer = null;
-
-  function applyEmotion(name) {
-    const e = EMOTIONS.has(name) ? name : "neutral";
-    document.body.dataset.emotion = e;
-    if (!state.speaking) mouth.setAttribute("d", MOUTHS[e] || MOUTHS.neutral);
-    cheeks.style.opacity = (e === "happy" || e === "surprised") ? "0.85" : "0";
-    antenna.setAttribute("fill", e === "thinking" ? "#ffc857" : e === "angry" ? "#ff6b5a" : "#6ec6ff");
-    // brow-ish pupil shift
-    const brow = { angry: -4, sad: 3, surprised: -2, thinking: 2 }[e] || 0;
-    pupilL.setAttribute("cy", 178 + brow);
-    pupilR.setAttribute("cy", 178 + brow);
-    const open = e === "surprised" ? 36 : e === "sleepy" ? 22 : 32;
-    eyeL.setAttribute("ry", open);
-    eyeR.setAttribute("ry", open);
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.170.0/build/three.module.js"
   }
+}
+</script>
+<script type="module">
+import * as THREE from "three";
 
-  function setAsleep(asleep) {
-    document.body.classList.toggle("asleep", asleep);
-    if (asleep) {
-      lids.style.transform = "scaleY(1)";
-      lids.classList.remove("blink");
-    } else if (!lids.classList.contains("blink")) {
-      lids.style.transform = "scaleY(0.08)";
+const EMOTIONS = new Set(["neutral","happy","sad","angry","surprised","sleepy","thinking"]);
+const canvas = document.getElementById("c");
+const bubble = document.getElementById("bubble");
+const menu = document.getElementById("menu");
+
+let state = {
+  emotion: "sleepy", awake: false, listening: false, speaking: false,
+  last_said: "", last_heard: "",
+};
+let speakPhase = 0;
+let blinkT = 0;
+let nextBlink = 2.5;
+let swayT = 0;
+
+const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, premultipliedAlpha: false });
+renderer.setClearColor(0x000000, 0);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 50);
+camera.position.set(0, 0.15, 3.2);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+const key = new THREE.DirectionalLight(0xffffff, 1.05);
+key.position.set(2, 3, 4);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0x88aaff, 0.35);
+fill.position.set(-2, 0.5, 2);
+scene.add(fill);
+
+const root = new THREE.Group();
+scene.add(root);
+
+const shellMat = new THREE.MeshStandardMaterial({ color: 0xc5ceda, roughness: 0.35, metalness: 0.15 });
+const darkMat = new THREE.MeshStandardMaterial({ color: 0x1e2838, roughness: 0.5 });
+const accentMat = new THREE.MeshStandardMaterial({ color: 0x6ec6ff, emissive: 0x1a4060, roughness: 0.4 });
+const pupilMat = new THREE.MeshStandardMaterial({ color: 0x152030 });
+const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf4f7fb, roughness: 0.25 });
+const cheekMat = new THREE.MeshStandardMaterial({ color: 0xe8a090, transparent: true, opacity: 0 });
+
+// body
+const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 0.55, 8, 20), shellMat);
+body.position.y = -0.55;
+root.add(body);
+
+// head
+const head = new THREE.Group();
+head.position.y = 0.45;
+root.add(head);
+const skull = new THREE.Mesh(new THREE.SphereGeometry(0.72, 28, 20), shellMat);
+skull.scale.set(1, 0.95, 0.9);
+head.add(skull);
+
+const visor = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.62, 0.35), darkMat);
+visor.position.set(0, 0.05, 0.48);
+visor.geometry.translate(0, 0, 0);
+head.add(visor);
+
+// ears
+[-1, 1].forEach((s) => {
+  const ear = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.22, 4, 10), shellMat);
+  ear.position.set(s * 0.78, 0.0, 0);
+  ear.rotation.z = s * 0.15;
+  head.add(ear);
+});
+
+// antenna
+const antenna = new THREE.Group();
+antenna.position.set(0, 0.78, 0);
+head.add(antenna);
+const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.28, 8), shellMat);
+stem.position.y = 0.14;
+antenna.add(stem);
+const tip = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 12), accentMat);
+tip.position.y = 0.32;
+antenna.add(tip);
+
+// eyes
+const eyes = new THREE.Group();
+eyes.position.set(0, 0.08, 0.55);
+head.add(eyes);
+function makeEye(x) {
+  const g = new THREE.Group();
+  g.position.x = x;
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), whiteMat);
+  ball.scale.set(1, 1.1, 0.7);
+  g.add(ball);
+  const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 12), pupilMat);
+  pupil.position.z = 0.12;
+  g.add(pupil);
+  const lid = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), shellMat);
+  lid.rotation.x = Math.PI;
+  lid.position.y = 0.02;
+  lid.scale.set(1.05, 1, 1.05);
+  g.add(lid);
+  g.userData = { pupil, lid, ball };
+  return g;
+}
+const eyeL = makeEye(-0.26);
+const eyeR = makeEye(0.26);
+eyes.add(eyeL, eyeR);
+
+const cheekL = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 10), cheekMat);
+cheekL.position.set(-0.42, -0.18, 0.55);
+const cheekR = cheekL.clone();
+cheekR.position.x = 0.42;
+head.add(cheekL, cheekR);
+
+// mouth (thin torus segment approx via scaled sphere flattened)
+const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.025, 8, 20, Math.PI), darkMat);
+mouth.position.set(0, -0.22, 0.68);
+mouth.rotation.x = Math.PI;
+head.add(mouth);
+
+function resize() {
+  const w = canvas.clientWidth || 220;
+  const h = canvas.clientHeight || 260;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / Math.max(h, 1);
+  camera.updateProjectionMatrix();
+}
+resize();
+addEventListener("resize", resize);
+
+function applyEmotion(e) {
+  const emo = EMOTIONS.has(e) ? e : "neutral";
+  tip.material.color.setHex(
+    emo === "angry" ? 0xff6b5a : emo === "thinking" ? 0xffc857 : emo === "happy" ? 0x7dffb0 : 0x6ec6ff
+  );
+  tip.material.emissive.setHex(emo === "thinking" ? 0x664400 : 0x1a4060);
+  cheekMat.opacity = (emo === "happy" || emo === "surprised") ? 0.85 : 0;
+  const open = emo === "surprised" ? 1.25 : emo === "sleepy" ? 0.55 : 1.0;
+  eyeL.userData.ball.scale.y = open;
+  eyeR.userData.ball.scale.y = open;
+  const brow = emo === "angry" ? 0.06 : emo === "sad" ? -0.05 : 0;
+  eyeL.position.y = brow;
+  eyeR.position.y = brow;
+  mouth.scale.set(
+    emo === "surprised" ? 0.7 : 1,
+    emo === "happy" ? 1.3 : emo === "sad" ? 0.7 : 1,
+    1
+  );
+  mouth.rotation.z = emo === "thinking" ? 0.25 : 0;
+}
+
+function setLids(closed) {
+  const y = closed ? 0.02 : 0.16;
+  const s = closed ? 1.2 : 0.15;
+  [eyeL, eyeR].forEach((eye) => {
+    eye.userData.lid.position.y = y;
+    eye.userData.lid.scale.y = s;
+  });
+}
+
+function animate(t) {
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, (animate.prev ? t - animate.prev : 16) / 1000);
+  animate.prev = t;
+  swayT += dt;
+  blinkT += dt;
+
+  const asleep = !state.awake || state.emotion === "sleepy";
+  applyEmotion(state.emotion);
+
+  if (asleep && !state.speaking) {
+    root.rotation.z = THREE.MathUtils.lerp(root.rotation.z, 0.35, 0.08);
+    root.position.y = THREE.MathUtils.lerp(root.position.y, -0.35, 0.08);
+    head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, 0.45, 0.08);
+    setLids(true);
+  } else {
+    const sway = Math.sin(swayT * 1.4) * 0.04;
+    root.rotation.z = THREE.MathUtils.lerp(root.rotation.z, sway, 0.1);
+    root.position.y = THREE.MathUtils.lerp(root.position.y, Math.sin(swayT * 2.1) * 0.03, 0.1);
+    head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, 0, 0.1);
+    if (blinkT > nextBlink) {
+      setLids(true);
+      if (blinkT > nextBlink + 0.12) {
+        setLids(false);
+        blinkT = 0;
+        nextBlink = 2.2 + Math.random() * 3.2;
+      }
+    } else {
+      setLids(false);
     }
   }
 
-  function blink() {
-    if (!state.awake || state.speaking) return;
-    lids.classList.add("blink");
-    lids.style.transform = "scaleY(1)";
-    setTimeout(() => {
-      lids.classList.remove("blink");
-      if (state.awake) lids.style.transform = "scaleY(0.08)";
-    }, 120);
+  // listen lean / pupils
+  const lean = state.listening && state.awake && !state.speaking ? -0.12 : 0;
+  head.rotation.y = THREE.MathUtils.lerp(head.rotation.y, lean, 0.1);
+  const px = state.listening ? 0.03 : Math.sin(swayT * 0.7) * 0.02;
+  [eyeL, eyeR].forEach((eye) => {
+    eye.userData.pupil.position.x = THREE.MathUtils.lerp(eye.userData.pupil.position.x, px, 0.15);
+  });
+
+  // speak bounce + mouth
+  if (state.speaking) {
+    speakPhase += dt * 14;
+    root.position.y += Math.abs(Math.sin(speakPhase)) * 0.012;
+    mouth.scale.y = 1.1 + Math.abs(Math.sin(speakPhase)) * 0.9;
+    mouth.scale.x = 0.85 + Math.abs(Math.cos(speakPhase * 0.8)) * 0.4;
   }
 
-  function scheduleBlink() {
-    clearTimeout(blinkTimer);
-    if (!state.awake) return;
-    blinkTimer = setTimeout(() => {
-      blink();
-      scheduleBlink();
-    }, 2200 + Math.random() * 3200);
-  }
+  antenna.rotation.z = Math.sin(swayT * 3) * 0.08;
+  renderer.render(scene, camera);
+  reportHitRect();
+}
+requestAnimationFrame(animate);
 
-  function drift() {
-    if (!state.awake) {
-      gaze.style.transform = "translate(0px, 0px)";
-      return;
-    }
-    const x = (Math.random() * 14) - 7;
-    const y = (Math.random() * 8) - 4;
-    gaze.style.transform = `translate(${x}px, ${y}px)`;
-  }
+function reportHitRect() {
+  if (!window.pywebview?.api?.update_hit_rect) return;
+  // Approximate pet as center ellipse in the canvas
+  const r = canvas.getBoundingClientRect();
+  const padX = r.width * 0.18;
+  const padY = r.height * 0.12;
+  const left = r.left + padX;
+  const top = r.top + padY;
+  const right = r.right - padX;
+  const bottom = r.bottom - padY * 0.6;
+  window.pywebview.api.update_hit_rect(left, top, right, bottom);
+}
 
-  function tickMouth() {
-    if (!state.speaking) {
-      applyEmotion(state.emotion);
-      return;
-    }
-    mouth.setAttribute("d", SPEAK[speakIdx % SPEAK.length]);
-    speakIdx++;
-  }
+async function poll() {
+  try {
+    const r = await fetch("/status", { cache: "no-store" });
+    if (!r.ok) return;
+    const s = await r.json();
+    state = {
+      emotion: s.emotion || "neutral",
+      awake: !!s.awake,
+      listening: !!s.listening,
+      speaking: !!s.speaking,
+      last_said: s.last_said || "",
+      last_heard: s.last_heard || "",
+    };
+  } catch (_) {}
+}
+setInterval(poll, 200);
+poll();
 
-  function render() {
-    const asleep = !state.awake || state.emotion === "sleepy";
-    setAsleep(asleep && !state.speaking);
-    applyEmotion(state.emotion);
-    said.textContent = (state.last_said || "").replace(/\s+/g, " ").trim().slice(0, 180);
-    if (state.awake) scheduleBlink();
-    else clearTimeout(blinkTimer);
-  }
+async function api(action, payload = {}) {
+  await fetch("/api/" + action, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Rocky-Console": "1",
+    },
+    body: JSON.stringify(payload),
+  });
+}
 
-  async function poll() {
-    try {
-      const r = await fetch("/status", { cache: "no-store" });
-      if (!r.ok) return;
-      const s = await r.json();
-      state = {
-        emotion: s.emotion || "neutral",
-        awake: !!s.awake,
-        listening: !!s.listening,
-        speaking: !!s.speaking,
-        last_said: s.last_said || "",
-        last_heard: s.last_heard || "",
-      };
-      render();
-    } catch (_) { /* brain restarting */ }
+canvas.addEventListener("click", (ev) => {
+  menu.classList.remove("show");
+  const text = (state.last_said || "").replace(/\s+/g, " ").trim();
+  if (!text) {
+    bubble.textContent = state.awake ? "…" : "(sleeping)";
+  } else {
+    bubble.textContent = text.slice(0, 220);
   }
+  bubble.classList.add("show");
+  clearTimeout(bubble._t);
+  bubble._t = setTimeout(() => bubble.classList.remove("show"), 4500);
+  ev.stopPropagation();
+});
 
-  setInterval(poll, 200);
-  setInterval(drift, 2800);
-  setInterval(tickMouth, 140);
-  poll();
-})();
+canvas.addEventListener("contextmenu", (ev) => {
+  ev.preventDefault();
+  bubble.classList.remove("show");
+  menu.style.left = Math.min(ev.clientX, innerWidth - 150) + "px";
+  menu.style.top = Math.min(ev.clientY, innerHeight - 140) + "px";
+  menu.classList.add("show");
+  const listenBtn = menu.querySelector('[data-act="listen"]');
+  listenBtn.textContent = state.listening ? "Stop listen" : "Listen";
+  const sleepBtn = menu.querySelector('[data-act="sleep"]');
+  sleepBtn.textContent = state.awake ? "Sleep" : "Wake";
+});
+
+document.addEventListener("click", () => menu.classList.remove("show"));
+
+menu.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button");
+  if (!btn) return;
+  const act = btn.dataset.act;
+  menu.classList.remove("show");
+  if (act === "sleep") {
+    await api("sleep", { on: !!state.awake });
+  } else if (act === "listen") {
+    await api("listen", { on: !state.listening });
+  } else if (act === "console") {
+    if (window.pywebview?.api?.open_console) window.pywebview.api.open_console();
+    else window.open("/", "_blank");
+  } else if (act === "quit") {
+    if (window.pywebview?.api?.quit_face) window.pywebview.api.quit_face();
+  }
+});
 </script>
 </body>
 </html>

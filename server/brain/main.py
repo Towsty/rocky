@@ -688,6 +688,14 @@ async def _console_command(action: str, payload: dict) -> dict:
             awake_until = time.time() + config.AWAKE_SECONDS
             await send_to_robot({"type": "asleep", "on": False})
             await send_to_robot({"type": "emotion", "name": "neutral"})
+    elif action == "listen":
+        # Desk pet / console: turn Mac/robot listening on or off.
+        if payload.get("on", True):
+            if ears is None:
+                await start_listening()
+        else:
+            if ears is not None:
+                stop_listening()
     elif action in ("say", "ask"):
         text = str(payload.get("text", "")).strip()
         if not text or len(text) > 300:
