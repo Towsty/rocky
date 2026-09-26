@@ -164,18 +164,30 @@ def _primary_work_area() -> tuple[int, int, int, int]:
 
 
 def pet_xy() -> tuple[int, int]:
+    """Bottom/top corner of a work area; always clamped inside that area."""
     apply_saved_dock()
     areas = list_monitor_work_areas()
+    if not areas:
+        return 100, 100
     idx = min(max(0, int(config.PET_MONITOR)), len(areas) - 1)
     left, top, right, bottom = areas[idx]
+    # Degenerate / bogus virtual display → fall back to primary.
+    if right - left < PET_W + 2 * PET_MARGIN or bottom - top < PET_H + 2 * PET_MARGIN:
+        left, top, right, bottom = areas[0]
+        idx = 0
     corner = config.PET_CORNER
     if corner == "bottom-left":
-        return left + PET_MARGIN, bottom - PET_H - PET_MARGIN
-    if corner == "top-right":
-        return right - PET_W - PET_MARGIN, top + PET_MARGIN
-    if corner == "top-left":
-        return left + PET_MARGIN, top + PET_MARGIN
-    return right - PET_W - PET_MARGIN, bottom - PET_H - PET_MARGIN
+        x, y = left + PET_MARGIN, bottom - PET_H - PET_MARGIN
+    elif corner == "top-right":
+        x, y = right - PET_W - PET_MARGIN, top + PET_MARGIN
+    elif corner == "top-left":
+        x, y = left + PET_MARGIN, top + PET_MARGIN
+    else:
+        x, y = right - PET_W - PET_MARGIN, bottom - PET_H - PET_MARGIN
+    # Clamp so the full window stays on this work area.
+    x = max(left, min(x, right - PET_W))
+    y = max(top, min(y, bottom - PET_H))
+    return int(x), int(y)
 
 
 def open_face_window() -> None:
@@ -184,36 +196,35 @@ def open_face_window() -> None:
     apply_saved_dock()
     print(f"face: console {console_url()}", flush=True)
     print(
-        f"face: dock monitor={config.PET_MONITOR} corner={config.PET_CORNER}",
+        f"face: dock monitor={config.PET_MONITOR} corner={config.PET_CORNER} OPEN_FACE={int(config.OPEN_FACE)}",
         flush=True,
     )
     if not config.OPEN_FACE:
-        print("face: auto-open off (OPEN_FACE=0)", flush=True)
+        print("pet: spawn skipped (OPEN_FACE=0)", flush=True)
         return
 
     def _spawn() -> None:
         global _proc
         time.sleep(0.35)
         if _proc is not None and _proc.poll() is None:
+            print(f"pet: spawn skipped (already running pid={_proc.pid})", flush=True)
             return
         py = sys.executable
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
+        cwd = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        print(f"pet: spawn {py} -m brain.face_pet (cwd={cwd})", flush=True)
         try:
             _proc = subprocess.Popen(
-                [py, "-m", "brain.face_pet"],
-                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                [py, "-u", "-m", "brain.face_pet"],
+                cwd=cwd,
                 env=env,
                 stdout=None,
                 stderr=None,
             )
-            print(
-                f"face: GL pet {PET_W}x{PET_H} "
-                f"(monitor {config.PET_MONITOR} {config.PET_CORNER}, pid={_proc.pid})",
-                flush=True,
-            )
+            print(f"pet: spawn ok pid={_proc.pid}", flush=True)
         except Exception as e:
-            print(f"face: could not start pet ({e})", flush=True)
+            print(f"pet: FAIL spawn ({type(e).__name__}: {e})", flush=True)
             return
 
         def _reap() -> None:
@@ -221,7 +232,7 @@ def open_face_window() -> None:
             if proc is None:
                 return
             code = proc.wait()
-            print(f"face: pet exited code={code}", flush=True)
+            print(f"pet: exited code={code}", flush=True)
 
         threading.Thread(target=_reap, daemon=True, name="rocky-face-reap").start()
 
