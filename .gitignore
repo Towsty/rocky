@@ -1,0 +1,8 @@
+﻿# Rocky / desk-robot brain
+server/.venv/
+server/__pycache__/
+server/**/__pycache__/
+server/debug/
+server/.env
+.env*
+!.env.example
