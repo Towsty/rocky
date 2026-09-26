@@ -25,7 +25,7 @@ from . import config
 PET_W = 300
 PET_H = 400
 PET_MARGIN = 8
-READY_TIMEOUT_S = 3.0
+READY_TIMEOUT_S = 9.0
 OPAQUE_BG = "#0a1018"
 CHROMA_KEY = "#00FE01"
 _DOCK_FILE = Path(__file__).resolve().parent.parent / "pet_dock.json"
@@ -40,6 +40,7 @@ _lock = threading.Lock()
 _proc: subprocess.Popen | None = None
 _opaque_mode = True
 _opaque_forced = False
+_disposed = False
 
 
 def face_url() -> str:
@@ -255,6 +256,8 @@ def _resolve_hwnd(window) -> int:
 
 def _force_destroy_hwnd(hwnd: int) -> None:
     """Last-resort HWND teardown so a wedged WebView cannot leave a white ghost."""
+    global _disposed
+    _disposed = True
     if not hwnd or sys.platform != "win32":
         return
     user32 = ctypes.windll.user32
@@ -267,10 +270,61 @@ def _force_destroy_hwnd(hwnd: int) -> None:
     except Exception:
         pass
     try:
-        # If DestroyWindow fails (wrong thread), post close.
         user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
     except Exception:
         pass
+
+
+def _client_looks_alive(hwnd: int) -> bool:
+    """True if the client area has drawn content (not flat black, not white veil)."""
+    if not hwnd or sys.platform != "win32":
+        return False
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", wintypes.LONG),
+            ("top", wintypes.LONG),
+            ("right", wintypes.LONG),
+            ("bottom", wintypes.LONG),
+        ]
+
+    rc = RECT()
+    if not user32.GetClientRect(hwnd, ctypes.byref(rc)):
+        return False
+    w, h = int(rc.right - rc.left), int(rc.bottom - rc.top)
+    if w < 4 or h < 4:
+        return False
+
+    hdc = user32.GetDC(hwnd)
+    if not hdc:
+        return False
+    try:
+        # 3x3 grid across the client — look for non-black / non-all-white.
+        pts: list[tuple[int, int, int]] = []
+        for fy in (0.2, 0.5, 0.8):
+            for fx in (0.2, 0.5, 0.8):
+                x = max(0, min(w - 1, int(w * fx)))
+                y = max(0, min(h - 1, int(h * fy)))
+                color = gdi32.GetPixel(hdc, x, y)
+                if color == -1:
+                    continue
+                r = color & 0xFF
+                g = (color >> 8) & 0xFF
+                b = (color >> 16) & 0xFF
+                pts.append((r, g, b))
+        if len(pts) < 3:
+            return False
+        non_black = [p for p in pts if p[0] + p[1] + p[2] > 40]
+        if not non_black:
+            return False  # blank black frame
+        near_white = sum(1 for p in pts if p[0] >= 245 and p[1] >= 245 and p[2] >= 245)
+        if near_white >= len(pts) * 0.85:
+            return False  # white “not responding” veil
+        return True
+    finally:
+        user32.ReleaseDC(hwnd, hdc)
 
 
 def _chroma_colorref() -> int:
@@ -416,7 +470,12 @@ class _PetApi:
     def __init__(self) -> None:
         self.on_ready = None  # type: ignore
 
+    def _alive(self) -> bool:
+        return not _disposed and _window is not None
+
     def pet_ready(self) -> None:
+        if not self._alive():
+            return
         print("pet: rockyReady", flush=True)
         cb = self.on_ready
         if callable(cb):
@@ -426,10 +485,14 @@ class _PetApi:
                 pass
 
     def pet_log(self, msg: str) -> None:
+        if _disposed:
+            return
         print(f"pet: {msg}", flush=True)
 
     def update_hit_rect(self, left: float, top: float, right: float, bottom: float) -> None:
         global _hit_screen
+        if not self._alive():
+            return
         with _lock:
             win = _window
             if win is None:
@@ -442,17 +505,24 @@ class _PetApi:
             _hit_screen = (wx + left, wy + top, wx + right, wy + bottom)
 
     def open_console(self) -> None:
+        if not self._alive():
+            return
         webbrowser.open(console_url())
 
     def quit_face(self) -> None:
+        global _disposed, _window
+        if _disposed:
+            return
         print("pet: quit requested", flush=True)
+        _disposed = True
         win = _window
         hwnd = _hwnd or (_resolve_hwnd(win) if win is not None else 0)
+        _window = None
         if win is not None:
             try:
                 win.destroy()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"pet: destroy after quit: {e}", flush=True)
         _force_destroy_hwnd(hwnd)
 
 
@@ -461,6 +531,8 @@ def _dock_and_chrome_loop() -> None:
     global _hwnd, _click_through
     while True:
         time.sleep(0.25)
+        if _disposed:
+            return
         win = _window
         if win is None:
             continue
@@ -498,6 +570,8 @@ def _dock_and_chrome_loop() -> None:
                     if not want_through:
                         _style_tool_topmost(_hwnd, opaque=_opaque_mode)
         except Exception:
+            if _disposed:
+                return
             pass
 
 
@@ -553,7 +627,7 @@ def open_face_window() -> None:
                 _proc = None
                 _spawn(opaque_force=True)
             elif code == 2:
-                print("pet: load timeout — ghost destroyed; not respawning", flush=True)
+                print("pet: load timeout — blank/veil destroyed; not respawning", flush=True)
 
         threading.Thread(target=_reap, daemon=True, name="rocky-face-reap").start()
 

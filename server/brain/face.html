@@ -51,8 +51,17 @@
     <canvas id="c"></canvas>
   </div>
 <script>
-  // If the ES module never loads (CDN hang), watchdog still needs a log line.
+  // Ready = first painted frame, not full Three.js boot.
   window.rockyReady = false;
+  function __rockySignalReady(why) {
+    if (window.rockyReady) return;
+    window.rockyReady = true;
+    try { console.log("pet: ready (" + why + ")"); } catch (e) {}
+    try { window.pywebview.api.pet_ready(); } catch (e) {}
+  }
+  requestAnimationFrame(function () {
+    __rockySignalReady("first-raf");
+  });
   setTimeout(function () {
     if (!window.rockyReady) {
       try { window.pywebview.api.pet_log("still loading @2.5s"); } catch (e) {}
@@ -75,12 +84,15 @@ const params = new URLSearchParams(location.search);
 const CHROMA_MODE = params.get("mode") === "chroma";
 if (CHROMA_MODE) document.documentElement.classList.add("chroma");
 
-window.rockyReady = false;
 function petLog(msg) {
   try { console.log("pet:", msg); } catch (_) {}
   try { window.pywebview?.api?.pet_log?.(String(msg)); } catch (_) {}
 }
 function signalReady(why) {
+  if (typeof window.__rockySignalReady === "function") {
+    window.__rockySignalReady(why);
+    return;
+  }
   if (window.rockyReady) return;
   window.rockyReady = true;
   petLog("ready (" + why + ")");
@@ -123,7 +135,7 @@ try {
   signalReady("webgl-fail");
   throw e;
 }
-// Opaque: dark clear. Chroma: keyed green (experimental only).
+// Opaque dark clear is fine — do not chase glass transparency.
 const CLEAR = CHROMA_MODE ? 0x00fe01 : 0x0a1018;
 renderer.setClearColor(CLEAR, 1);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -136,6 +148,18 @@ scene.background = null;
 const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 40);
 camera.position.set(0, 0.02, 5.8);
 camera.lookAt(0, -0.08, 0);
+
+// First clear+present before heavy env map so ready fires even if PMREM is slow.
+{
+  const w = canvas.clientWidth || 300;
+  const h = canvas.clientHeight || 400;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / Math.max(h, 1);
+  camera.updateProjectionMatrix();
+  renderer.clear();
+  renderer.render(scene, camera);
+  signalReady("webgl-clear");
+}
 
 try {
   const pmrem = new THREE.PMREMGenerator(renderer);
