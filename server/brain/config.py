@@ -116,9 +116,8 @@ STT_THREADS = 8          # CPU threads for transcription (0 = library default of
 STT_PROMPT = f"Hey {ROBOT_NAME}. {ROBOT_NAME} is a robot."  # name hint for the model
 MIC_SOURCE = "auto"      # "robot" = the robot's mic, "mac" = MIC_DEVICE below,
                          # "auto" = robot when it's connected, else this computer
-_mic = os.environ.get("MIC_DEVICE") or None  # name substring, or a device index (Windows)
+_mic = os.environ.get("MIC_DEVICE") or None  # name substring, or device index; None = default
 MIC_DEVICE = int(_mic) if _mic is not None and _mic.isdigit() else _mic
-                         # server/.env); None = system default. List devices: python -m sounddevice
 # Speech detection (server/brain/turn.py). A Silero VAD model decides whether
 # each 32 ms chunk is speech (VAD_THRESHOLD, 0..1: lower = more sensitive).
 # Once speech starts, a cutoff 0.15 lower keeps softer syllables from being
