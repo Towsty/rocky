@@ -723,7 +723,10 @@ async def mic_meter() -> None:
     if ears is None:
         print("(not listening — type `listen` first)")
         return
-    which = "robot mic" if ears.source == "robot" else f"Mac mic \"{ears.device_name}\""
+    which = (
+        "robot mic" if ears.source == "robot"
+        else f"Mac mic \"{ears.device_name}\" [{ears.device}] ({ears.device_reason})"
+    )
     print(f"{which}: talk for 3 seconds...")
     peak_level = 0.0
     peak_prob = 0.0
@@ -733,13 +736,18 @@ async def mic_meter() -> None:
         peak_level = max(peak_level, level)
         peak_prob = max(peak_prob, prob)
         print(f"  level {level:.3f} {'#' * min(40, int(level * 500)):40s} speech {prob:.2f}")
-    print(f"peak level {peak_level:.3f}, peak speech probability {peak_prob:.2f} (needs > {config.VAD_THRESHOLD}) ->",
-          "speech detected" if peak_prob > config.VAD_THRESHOLD else
-          ("NOT DETECTED: raise MIC_GAIN in firmware config.h, or get closer" if ears.source == "robot" else
-           "NOT DETECTED: wrong mic, gain down, or no mic permission"))
-    if ears.source == "mac":
-        import sounddevice as sd
-        print("other inputs:", ", ".join(f"[{i}] {d['name']}" for i, d in enumerate(sd.query_devices()) if d["max_input_channels"] > 0))
+    detected = peak_prob > config.VAD_THRESHOLD
+    print(
+        f"peak level {peak_level:.3f}, peak speech probability {peak_prob:.2f} "
+        f"(needs > {config.VAD_THRESHOLD}) ->",
+        "speech detected" if detected else
+        ("NOT DETECTED: raise MIC_GAIN in firmware config.h, or get closer" if ears.source == "robot" else
+         "NOT DETECTED: wrong mic, gain down, or no mic permission"),
+    )
+    if ears.source == "mac" and not detected:
+        print("MIC_DEVICE is wrong or quiet — pick a name from the list and set it in server/.env, then restart:")
+        from .ears import list_input_devices
+        list_input_devices(selected=ears.device)
 
 
 async def start_listening() -> None:
@@ -768,7 +776,7 @@ async def start_listening() -> None:
         print("  the robot's mic still works; for a Mac fallback check MIC_DEVICE in server/.env,")
         print("  plug the interface in, or allow the Terminal to use the microphone")
     else:
-        print(f"listening on \"{mic}\" — say \"hey {config.ROBOT_NAME}\"")
+        print(f"listening on \"{mic}\" — say \"hey {config.ROBOT_NAME}\" ({ears.device_reason})")
     pick_mic_source()
 
 
@@ -919,6 +927,7 @@ async def console_loop() -> None:
 async def main() -> None:
     print(f"{config.ROBOT_NAME} brain server — model {config.MODEL}")
     print(f"listening for the robot on ws://0.0.0.0:{config.PORT}")
+    mouth.announce_fish()
     eyes.state_provider = console_state
     eyes.command_handler = console_command
     eyes.serve(config.LIVE_VIEW_PORT, config.LIVE_VIEW_BIND)

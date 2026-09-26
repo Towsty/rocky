@@ -8,7 +8,7 @@ from pathlib import Path
 # per line. Anything already exported in the shell wins over the file.
 _ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 if _ENV_FILE.is_file():
-    for _line in _ENV_FILE.read_text().splitlines():
+    for _line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
         _line = _line.strip()
         if not _line or _line.startswith("#") or "=" not in _line:
             continue
@@ -70,6 +70,9 @@ PORT = 8765
 # The console page has sliders for level / bass cut / presence that apply
 # live; set the winners here to keep them.
 TTS_VOICE_ID = os.environ.get("TTS_VOICE_ID", "6dd07916890445e59c5f019ad0fc7879")
+# Fish developer TTS model (HTTP header `model`). Paid API: s1 / s2-pro / s2.1-pro.
+# Do not use s2.1-pro-free (website/free tier). Empty API wallet → HTTP 402.
+FISH_TTS_MODEL = os.environ.get("FISH_TTS_MODEL", "s2-pro")
 TTS_TEMPERATURE = 0.4
 TTS_TOP_P = 0.6
 REPLY_MAX_SENTENCES = 3
@@ -114,10 +117,10 @@ STT_MODEL = "base.en"    # faster-whisper model: base.en ~0.3 s per utterance on
 STT_REVISION = "3d3d5dee26484f91867d81cb899cfcf72b96be6c"
 STT_THREADS = 8          # CPU threads for transcription (0 = library default of 4)
 STT_PROMPT = f"Hey {ROBOT_NAME}. {ROBOT_NAME} is a robot."  # name hint for the model
-MIC_SOURCE = "auto"      # "robot" = the robot's mic, "mac" = MIC_DEVICE below,
-                         # "auto" = robot when it's connected, else this computer
-_mic = os.environ.get("MIC_DEVICE") or None  # name substring, or device index; None = default
-MIC_DEVICE = int(_mic) if _mic is not None and _mic.isdigit() else _mic
+MIC_SOURCE = os.environ.get("MIC_SOURCE", "auto")  # "robot" | "mac" (this computer) | "auto"
+# Local input: name substring (case-insensitive) or a PortAudio device index.
+# Empty → Windows default communications input, else default input (see ears.resolve_input_device).
+MIC_DEVICE = os.environ.get("MIC_DEVICE") or None
 # Speech detection (server/brain/turn.py). A Silero VAD model decides whether
 # each 32 ms chunk is speech (VAD_THRESHOLD, 0..1: lower = more sensitive).
 # Once speech starts, a cutoff 0.15 lower keeps softer syllables from being

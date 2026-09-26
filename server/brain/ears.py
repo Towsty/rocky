@@ -34,6 +34,183 @@ BLOCK_SAMPLES = int(SAMPLE_RATE * BLOCK_SECONDS)
 CHUNK_SECONDS = VAD_CHUNK / SAMPLE_RATE  # 32 ms: the VAD's step
 
 
+def _hostapi_name(hostapi: int) -> str:
+    import sounddevice as sd
+    try:
+        return sd.query_hostapis(hostapi)["name"]
+    except Exception:
+        return str(hostapi)
+
+
+def _device_opens_at_16k(index: int) -> bool:
+    import sounddevice as sd
+    try:
+        with sd.InputStream(
+            device=index, channels=1, samplerate=SAMPLE_RATE, dtype="float32", blocksize=512
+        ):
+            return True
+    except Exception:
+        return False
+
+
+def _windows_capture_names() -> tuple[str | None, str | None]:
+    """(communications_friendly_name, default_friendly_name) via WinRT + registry."""
+    import subprocess
+
+    script = r"""
+[void][Windows.Media.Devices.MediaDevice,Windows.Media.Devices,ContentType=WindowsRuntime]
+$comms = [Windows.Media.Devices.MediaDevice]::GetDefaultAudioCaptureId([Windows.Media.Devices.AudioDeviceRole]::Communications)
+$def = [Windows.Media.Devices.MediaDevice]::GetDefaultAudioCaptureId([Windows.Media.Devices.AudioDeviceRole]::Default)
+function GuidOf($id) { ([regex]::Match($id, '\{[0-9a-fA-F\-]{36}\}').Value) }
+$cg = GuidOf $comms; $dg = GuidOf $def
+$base = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
+$cn = $null; $dn = $null
+Get-ChildItem $base -ErrorAction SilentlyContinue | ForEach-Object {
+  $guid = $_.PSChildName
+  $propPath = Join-Path $_.PSPath 'Properties'
+  if (-not (Test-Path $propPath)) { return }
+  $friendly = $null
+  foreach ($n in (Get-Item $propPath).Property) {
+    if ($n -match 'a45c254e-df1c-4efd-8020-67d146a850e0\},2$') {
+      $friendly = (Get-ItemProperty $propPath).$n
+    }
+  }
+  if ($guid -eq $cg) { $cn = $friendly }
+  if ($guid -eq $dg) { $dn = $friendly }
+}
+Write-Output ("COMMS_NAME=" + $cn)
+Write-Output ("DEFAULT_NAME=" + $dn)
+"""
+    try:
+        out = subprocess.check_output(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            text=True,
+            errors="replace",
+            timeout=8,
+        )
+    except Exception:
+        return None, None
+    comms = default = None
+    for line in out.splitlines():
+        if line.startswith("COMMS_NAME="):
+            comms = line.split("=", 1)[1].strip() or None
+        elif line.startswith("DEFAULT_NAME="):
+            default = line.split("=", 1)[1].strip() or None
+    return comms, default
+
+
+def _match_name_to_index(needle: str, devices: list) -> int | None:
+    """Case-insensitive substring match; prefer a device that opens at 16 kHz."""
+    needle_l = needle.lower()
+    hits = [
+        i for i, d in enumerate(devices)
+        if d["max_input_channels"] > 0 and needle_l in d["name"].lower()
+    ]
+    if not hits:
+        return None
+    for i in hits:
+        if _device_opens_at_16k(i):
+            return i
+    return hits[0]
+
+
+def list_input_devices(
+    selected: int | None = None,
+    comms_name: str | None = None,
+    default_name: str | None = None,
+) -> None:
+    """Print every input: index, name, hostapi, default / default_communication markers."""
+    import sounddevice as sd
+
+    devices = list(sd.query_devices())
+    pa_default = sd.default.device[0]
+    print("input devices:")
+    for i, d in enumerate(devices):
+        if d["max_input_channels"] <= 0:
+            continue
+        host = _hostapi_name(d["hostapi"])
+        flags: list[str] = []
+        if i == pa_default:
+            flags.append("default")
+        if comms_name and comms_name.lower() in d["name"].lower():
+            flags.append("default_communication")
+        if default_name and default_name.lower() in d["name"].lower() and "default" not in flags:
+            # Windows multimedia default often matches PortAudio default already
+            if "default" not in flags:
+                flags.append("win_default")
+        mark = "->" if selected is not None and i == selected else "  "
+        flag_s = f" [{', '.join(flags)}]" if flags else ""
+        print(f"{mark} [{i}] {d['name']}  hostapi={host}{flag_s}")
+
+
+def resolve_input_device(
+    mic_device: str | int | None = None,
+) -> tuple[int | None, str, str]:
+    """Pick a PortAudio input index.
+
+    Order: MIC_DEVICE (substring or index) → Windows default communications →
+    Windows/PortAudio default input. Never “first device in the list”.
+    Returns (index_or_None, display_name, reason).
+    """
+    import sounddevice as sd
+
+    devices = list(sd.query_devices())
+    want = config.MIC_DEVICE if mic_device is None else mic_device
+    comms_name, win_default_name = (None, None)
+    if sys_platform_is_win():
+        comms_name, win_default_name = _windows_capture_names()
+
+    chosen: int | None = None
+    reason = ""
+
+    if want is not None and str(want).strip() != "":
+        raw = str(want).strip()
+        if raw.isdigit():
+            idx = int(raw)
+            if 0 <= idx < len(devices) and devices[idx]["max_input_channels"] > 0:
+                chosen, reason = idx, f"MIC_DEVICE index {idx}"
+            else:
+                reason = f"MIC_DEVICE={raw!r} is not a valid input index"
+        else:
+            idx = _match_name_to_index(raw, devices)
+            if idx is not None:
+                chosen, reason = idx, f"MIC_DEVICE name match {raw!r}"
+            else:
+                reason = f"MIC_DEVICE={raw!r} matched no input name"
+
+    if chosen is None and comms_name:
+        idx = _match_name_to_index(comms_name, devices)
+        if idx is not None:
+            chosen, reason = idx, f"Windows default communications ({comms_name!r})"
+
+    if chosen is None and win_default_name:
+        idx = _match_name_to_index(win_default_name, devices)
+        if idx is not None:
+            chosen, reason = idx, f"Windows default input ({win_default_name!r})"
+
+    if chosen is None:
+        pa = sd.default.device[0]
+        if isinstance(pa, (list, tuple)):
+            pa = pa[0]
+        if pa is not None and int(pa) >= 0 and devices[int(pa)]["max_input_channels"] > 0:
+            chosen, reason = int(pa), "PortAudio default input"
+        else:
+            reason = "no input device available"
+
+    name = devices[chosen]["name"] if chosen is not None else "?"
+    list_input_devices(selected=chosen, comms_name=comms_name, default_name=win_default_name)
+    if chosen is not None:
+        print(f"mic selected: [{chosen}] {name}  ({reason})")
+    else:
+        print(f"mic selected: none  ({reason})")
+    return chosen, name, reason
+
+
+def sys_platform_is_win() -> bool:
+    import sys
+    return sys.platform == "win32"
+
+
 class HighPass:
     """One-pole high-pass (~120 Hz). The PDM mic puts out a DC offset and a lot
     of sub-150 Hz rumble that swamps the noise floor; speech doesn't live there."""
@@ -269,11 +446,13 @@ class Ears:
         self,
         on_utterance: Callable[[str, float, float], None],
         on_speech_start: Callable[[], None] | None = None,
-        device: int | str | None = config.MIC_DEVICE,
+        device: int | str | None = None,
     ) -> None:
         self.on_utterance = on_utterance
-        self.device = device
-        self.device_name = "?"
+        resolved, name, reason = resolve_input_device(device)
+        self.device = resolved
+        self.device_name = name
+        self.device_reason = reason
         self.mac_error: str | None = None  # why the Mac mic could not be opened, if it couldn't
         self.muted = threading.Event()  # set while Rocky is talking (no echo cancel)
         self.source = "mac"             # "mac" or "robot": whose audio is live
@@ -326,6 +505,8 @@ class Ears:
         try:
             import sounddevice as sd
 
+            if self.device is None:
+                raise RuntimeError(self.device_reason or "no input device")
             # Open every input the device has (a USB interface often has two) and mix them,
             # so it doesn't matter which jack the mic is plugged into.
             channels = max(1, int(sd.query_devices(self.device, "input")["max_input_channels"]))

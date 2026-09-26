@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 import wave
 from collections.abc import Iterator
@@ -45,6 +46,17 @@ def fish_available() -> bool:
     return bool(config.TTS_VOICE_ID and os.environ.get("FISH_AUDIO_API_KEY"))
 
 
+def announce_fish() -> None:
+    """Startup line: endpoint + paid model + voice id (never the API key)."""
+    if not fish_available():
+        print("Fish TTS: off (set FISH_AUDIO_API_KEY and TTS_VOICE_ID for Rocky's voice)")
+        return
+    print(
+        f"Fish TTS: {FISH_TTS_URL}  model={config.FISH_TTS_MODEL}  "
+        f"voice={config.TTS_VOICE_ID}"
+    )
+
+
 _MARKUP = re.compile(r"[*_`#~<>\[\]{}|\\]")
 _EMOJI = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]")
 
@@ -61,8 +73,41 @@ def clean_for_tts(text: str) -> str:
     return text
 
 
+def _fish_http_message(exc: urllib.error.HTTPError, model: str) -> str:
+    """One-line reason for a Fish HTTP failure (no key, no free-model retry)."""
+    body = ""
+    try:
+        body = exc.read().decode("utf-8", errors="replace").strip()
+    except Exception:
+        pass
+    if len(body) > 200:
+        body = body[:200] + "…"
+    status = exc.code
+    if status == 401:
+        tip = "401 bad key — check FISH_AUDIO_API_KEY"
+    elif status == 402:
+        tip = f"402 on model {model}, check API billing top-up (empty developer API wallet, not website Plus minutes)"
+    elif status == 404:
+        tip = "404 bad voice id — check TTS_VOICE_ID"
+    else:
+        tip = f"HTTP {status}"
+    if body:
+        return f"Fish {tip}; body={body!r}"
+    return f"Fish {tip}"
+
+
+_fish_announced_ok = False
+
+
 def _fish_stream(text: str) -> Iterator[bytes]:
-    """Raw 16 kHz PCM from Fish Audio, yielded as the server produces it."""
+    """Raw 16 kHz PCM from Fish Audio, yielded as the server produces it.
+
+    Model is the paid developer-API header (FISH_TTS_MODEL), not the website
+    free tier. Omitting the header used to fall through to whatever Fish
+    defaults — we always send an explicit paid model.
+    """
+    global _fish_announced_ok
+    model = config.FISH_TTS_MODEL
     body = json.dumps(
         {
             "text": text,
@@ -81,12 +126,22 @@ def _fish_stream(text: str) -> Iterator[bytes]:
         headers={
             "Authorization": f"Bearer {os.environ['FISH_AUDIO_API_KEY']}",
             "Content-Type": "application/json",
+            "model": model,  # Fish OpenAPI: paid s1 / s2-pro / s2.1-pro (not s2.1-pro-free)
         },
     )
     # python.org builds of Python on macOS don't see the system root certs;
     # certifi's bundle (already installed with the openai package) does.
     ctx = ssl.create_default_context(cafile=certifi.where())
-    with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+    try:
+        resp_ctx = urllib.request.urlopen(req, timeout=30, context=ctx)
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(_fish_http_message(e, model)) from None
+    except Exception as e:
+        raise RuntimeError(f"Fish request failed on model {model}: {e}") from None
+    with resp_ctx as resp:
+        if not _fish_announced_ok:
+            print(f"(Fish TTS HTTP {resp.status} model={model} voice={config.TTS_VOICE_ID})")
+            _fish_announced_ok = True
         carry = b""  # a chunk boundary can split a 16-bit sample in half
         while chunk := resp.read(4096):
             chunk = carry + chunk
