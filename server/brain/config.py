@@ -170,6 +170,8 @@ EMOTIONS = [
 CAMERA_FPS = 10
 LIVE_VIEW_PORT = 8766
 LIVE_VIEW_BIND = "127.0.0.1"  # this computer only. "0.0.0.0" would show the camera to the whole LAN.
+# Companion face window (http://127.0.0.1:8766/face). Default on; set OPEN_FACE=0 to skip.
+OPEN_FACE = os.environ.get("OPEN_FACE", "1").strip().lower() not in ("0", "false", "no", "off")
 SEND_CAMERA_TO_BRAIN = True  # let Rocky see the camera when a question is about seeing
 # A frame is attached only when the question is about seeing (any of these
 # words or phrases). Everyday words like "this", "that", "here", "there" and

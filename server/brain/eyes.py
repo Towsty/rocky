@@ -6,6 +6,7 @@ newest. A tiny HTTP server (standard library, its own thread) serves:
   /          the console page (brain/liveview.html): what Rocky sees and
              hears, plus controls for his head, face, voice, sleep and
              listening tuning
+  /face      companion window: full-viewport CSS/SVG robot driven by /status
   /stream    multipart MJPEG — the newest frame, pushed as it changes
   /frame     the newest frame as a plain JPEG
   /status    JSON: fps, frame age, chip temperature, last transcript, and
@@ -95,6 +96,7 @@ class Eyes:
         eyes = self
         page = (Path(__file__).with_name("liveview.html").read_text(encoding="utf-8")
                 .replace("{name}", config.ROBOT_NAME).encode())
+        face_page = Path(__file__).with_name("face.html").read_text(encoding="utf-8").encode()
         local_hosts = ("localhost", "127.0.0.1", "::1", bind.lower())
 
         class Handler(BaseHTTPRequestHandler):
@@ -153,14 +155,17 @@ class Eyes:
             def do_GET(self) -> None:
                 if not self._local():
                     return
-                if self.path == "/":
+                path = self.path.split("?", 1)[0]
+                if path == "/":
                     self._reply(200, "text/html; charset=utf-8", page)
-                elif self.path == "/frame":
+                elif path == "/face":
+                    self._reply(200, "text/html; charset=utf-8", face_page)
+                elif path == "/frame":
                     if eyes.jpeg:
                         self._reply(200, "image/jpeg", eyes.jpeg)
                     else:
                         self._reply(503, "text/plain", b"no frame yet")
-                elif self.path == "/status":
+                elif path == "/status":
                     st = {
                         "fps": round(eyes.fps(), 1),
                         "frame_age_s": round(time.time() - eyes.frame_at, 1) if eyes.frame_at else None,
@@ -176,7 +181,7 @@ class Eyes:
                         except Exception as e:  # never let a status bug kill the page
                             st["state_error"] = str(e)
                     self._reply(200, "application/json", json.dumps(st).encode())
-                elif self.path == "/stream":
+                elif path == "/stream":
                     self._stream()
                 else:
                     self._reply(404, "text/plain", b"not found")

@@ -46,6 +46,7 @@ from . import config, mouth, personality
 from .thinking import Interrupted, RobotBrain
 from .ears import Ears, normalize, strip_wake_word
 from .eyes import Eyes
+from .face_window import open_face_window
 from .tracker import Tracker
 
 robot_socket: websockets.ServerConnection | None = None
@@ -932,6 +933,7 @@ async def main() -> None:
     eyes.command_handler = console_command
     eyes.serve(config.LIVE_VIEW_PORT, config.LIVE_VIEW_BIND)
     print(f"live view + controls: http://localhost:{config.LIVE_VIEW_PORT}/  (this computer only)")
+    open_face_window()
     if not os.environ.get("ROBOT_TOKEN"):
         print("WARNING: ROBOT_TOKEN is not set in server/.env — the robot will be refused")
     global tracker, brain, main_loop
