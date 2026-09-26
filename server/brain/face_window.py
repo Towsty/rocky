@@ -1,22 +1,16 @@
-"""Desk pet launcher: frameless always-on-top window above the taskbar.
+"""Desk-pet dock helpers + process launcher (no WebView).
 
-pywebview must own the process main thread on Windows, so the pet runs as a
-short-lived child: ``python -m brain.face_pet <url>``.
-
-Default is **opaque** (dark card). Chroma/layered alpha is opt-in via PET_ALPHA=1
-because it wedges WebView2 into a white “not responding” ghost on Ian’s box.
+Pet renderer: ``python -m brain.face_pet`` (moderngl + glfw, per-pixel alpha).
 """
 
 from __future__ import annotations
 
-import ctypes
 import json
 import os
 import subprocess
 import sys
 import threading
 import time
-import webbrowser
 from ctypes import wintypes
 from pathlib import Path
 
@@ -25,22 +19,11 @@ from . import config
 PET_W = 300
 PET_H = 400
 PET_MARGIN = 8
-READY_TIMEOUT_S = 9.0
-OPAQUE_BG = "#0a1018"
-CHROMA_KEY = "#00FE01"
-_DOCK_FILE = Path(__file__).resolve().parent.parent / "pet_dock.json"
-_MODE_FILE = Path(__file__).resolve().parent.parent / "pet_mode.json"
+_UI_FILE = Path(__file__).resolve().parent.parent / "pet-ui.json"
+_LEGACY_DOCK = Path(__file__).resolve().parent.parent / "pet_dock.json"
 _CORNERS = ("bottom-right", "bottom-left", "top-right", "top-left")
 
-_window = None
-_hwnd = 0
-_hit_screen: tuple[float, float, float, float] | None = None
-_click_through = False
-_lock = threading.Lock()
 _proc: subprocess.Popen | None = None
-_opaque_mode = True
-_opaque_forced = False
-_disposed = False
 
 
 def face_url() -> str:
@@ -53,53 +36,20 @@ def console_url() -> str:
     return f"http://{host}:{config.LIVE_VIEW_PORT}/"
 
 
-def is_opaque_mode() -> bool:
-    """Opaque unless PET_ALPHA=1 and we have not forced opaque after a hang."""
-    if _MODE_FILE.is_file():
+def _load_ui() -> dict:
+    for path in (_UI_FILE, _LEGACY_DOCK):
         try:
-            data = json.loads(_MODE_FILE.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and data.get("opaque") is True:
-                return True
+            if path.is_file():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
         except Exception:
             pass
-    # PET_ALPHA=1 opts into chroma; anything else → opaque (safe).
-    alpha = (os.environ.get("PET_ALPHA") or "").strip().lower() in ("1", "true", "yes", "on")
-    return not alpha
-
-
-def set_opaque_mode(opaque: bool) -> None:
-    global _opaque_mode
-    _opaque_mode = bool(opaque)
-
-
-def mark_opaque_fallback() -> None:
-    """Persist opaque so the next launch skips the hanging alpha path."""
-    global _opaque_forced
-    _opaque_forced = True
-    try:
-        _MODE_FILE.write_text(json.dumps({"opaque": True}, indent=2) + "\n", encoding="utf-8")
-    except OSError:
-        pass
-    # Attribute used by face_pet log line
-    mark_opaque_fallback.was_forced = True  # type: ignore[attr-defined]
-
-
-mark_opaque_fallback.was_forced = False  # type: ignore[attr-defined]
-
-
-def _load_dock_file() -> dict:
-    try:
-        if _DOCK_FILE.is_file():
-            data = json.loads(_DOCK_FILE.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                return data
-    except Exception:
-        pass
     return {}
 
 
 def save_dock(monitor: int | None = None, corner: str | None = None) -> dict:
-    """Update in-memory config + pet_dock.json (+ best-effort .env keys)."""
+    """Update config + pet-ui.json (+ best-effort .env)."""
     if monitor is not None:
         config.PET_MONITOR = max(0, int(monitor))
     if corner is not None:
@@ -108,9 +58,9 @@ def save_dock(monitor: int | None = None, corner: str | None = None) -> dict:
             config.PET_CORNER = c
     data = {"monitor": int(config.PET_MONITOR), "corner": config.PET_CORNER}
     try:
-        _DOCK_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        _UI_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     except OSError as e:
-        print(f"face: could not write pet_dock.json ({e})")
+        print(f"face: could not write pet-ui.json ({e})", flush=True)
     _persist_env_dock(data["monitor"], data["corner"])
     return data
 
@@ -145,8 +95,7 @@ def _persist_env_dock(monitor: int, corner: str) -> None:
 
 
 def apply_saved_dock() -> None:
-    """Load pet_dock.json over env defaults (file wins for live moves)."""
-    data = _load_dock_file()
+    data = _load_ui()
     if "monitor" in data:
         try:
             config.PET_MONITOR = max(0, int(data["monitor"]))
@@ -159,9 +108,9 @@ def apply_saved_dock() -> None:
 
 
 def list_monitor_work_areas() -> list[tuple[int, int, int, int]]:
-    """Per-monitor work areas (excludes taskbar): (left, top, right, bottom)."""
     if sys.platform != "win32":
         return [_primary_work_area()]
+    import ctypes
 
     class RECT(ctypes.Structure):
         _fields_ = [
@@ -199,7 +148,7 @@ def list_monitor_work_areas() -> list[tuple[int, int, int, int]]:
 def _primary_work_area() -> tuple[int, int, int, int]:
     if sys.platform != "win32":
         return 0, 0, 1920, 1080
-    SPI_GETWORKAREA = 0x0030
+    import ctypes
 
     class RECT(ctypes.Structure):
         _fields_ = [
@@ -210,424 +159,69 @@ def _primary_work_area() -> tuple[int, int, int, int]:
         ]
 
     rect = RECT()
-    ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0)
+    ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0)
     return int(rect.left), int(rect.top), int(rect.right), int(rect.bottom)
 
 
-def _pet_xy() -> tuple[int, int]:
+def pet_xy() -> tuple[int, int]:
     apply_saved_dock()
     areas = list_monitor_work_areas()
     idx = min(max(0, int(config.PET_MONITOR)), len(areas) - 1)
     left, top, right, bottom = areas[idx]
     corner = config.PET_CORNER
     if corner == "bottom-left":
-        x, y = left + PET_MARGIN, bottom - PET_H - PET_MARGIN
-    elif corner == "top-right":
-        x, y = right - PET_W - PET_MARGIN, top + PET_MARGIN
-    elif corner == "top-left":
-        x, y = left + PET_MARGIN, top + PET_MARGIN
-    else:
-        x, y = right - PET_W - PET_MARGIN, bottom - PET_H - PET_MARGIN
-    return x, y
-
-
-def _resolve_hwnd(window) -> int:
-    native = getattr(window, "native", None)
-    if native is None:
-        return 0
-    handle = getattr(native, "Handle", None)
-    if handle is not None:
-        try:
-            return int(handle.ToInt32())
-        except Exception:
-            try:
-                return int(handle)
-            except Exception:
-                pass
-    for attr in ("Hwnd", "hwnd", "handle"):
-        h = getattr(native, attr, None)
-        if h:
-            try:
-                return int(h)
-            except Exception:
-                continue
-    return 0
-
-
-def _force_destroy_hwnd(hwnd: int) -> None:
-    """Last-resort HWND teardown so a wedged WebView cannot leave a white ghost."""
-    global _disposed
-    _disposed = True
-    if not hwnd or sys.platform != "win32":
-        return
-    user32 = ctypes.windll.user32
-    try:
-        user32.ShowWindow(hwnd, 0)  # SW_HIDE
-    except Exception:
-        pass
-    try:
-        user32.DestroyWindow(hwnd)
-    except Exception:
-        pass
-    try:
-        user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
-    except Exception:
-        pass
-
-
-def _client_looks_alive(hwnd: int) -> bool:
-    """True if the client area has drawn content (not flat black, not white veil)."""
-    if not hwnd or sys.platform != "win32":
-        return False
-    user32 = ctypes.windll.user32
-    gdi32 = ctypes.windll.gdi32
-
-    class RECT(ctypes.Structure):
-        _fields_ = [
-            ("left", wintypes.LONG),
-            ("top", wintypes.LONG),
-            ("right", wintypes.LONG),
-            ("bottom", wintypes.LONG),
-        ]
-
-    rc = RECT()
-    if not user32.GetClientRect(hwnd, ctypes.byref(rc)):
-        return False
-    w, h = int(rc.right - rc.left), int(rc.bottom - rc.top)
-    if w < 4 or h < 4:
-        return False
-
-    hdc = user32.GetDC(hwnd)
-    if not hdc:
-        return False
-    try:
-        # 3x3 grid across the client — look for non-black / non-all-white.
-        pts: list[tuple[int, int, int]] = []
-        for fy in (0.2, 0.5, 0.8):
-            for fx in (0.2, 0.5, 0.8):
-                x = max(0, min(w - 1, int(w * fx)))
-                y = max(0, min(h - 1, int(h * fy)))
-                color = gdi32.GetPixel(hdc, x, y)
-                if color == -1:
-                    continue
-                r = color & 0xFF
-                g = (color >> 8) & 0xFF
-                b = (color >> 16) & 0xFF
-                pts.append((r, g, b))
-        if len(pts) < 3:
-            return False
-        non_black = [p for p in pts if p[0] + p[1] + p[2] > 40]
-        if not non_black:
-            return False  # blank black frame
-        near_white = sum(1 for p in pts if p[0] >= 245 and p[1] >= 245 and p[2] >= 245)
-        if near_white >= len(pts) * 0.85:
-            return False  # white “not responding” veil
-        return True
-    finally:
-        user32.ReleaseDC(hwnd, hdc)
-
-
-def _chroma_colorref() -> int:
-    h = CHROMA_KEY.lstrip("#")
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    return r | (g << 8) | (b << 16)
-
-
-def _apply_colorkey_hwnd(hwnd: int) -> None:
-    if not hwnd:
-        return
-    user32 = ctypes.windll.user32
-    GWL_EXSTYLE = -20
-    WS_EX_LAYERED = 0x00080000
-    LWA_COLORKEY = 0x00000001
-    style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
-    user32.SetLayeredWindowAttributes(hwnd, _chroma_colorref(), 255, LWA_COLORKEY)
-
-
-def _enum_child_hwnds(parent: int) -> list[int]:
-    kids: list[int] = []
-    if not parent:
-        return kids
-    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HWND, wintypes.LPARAM)
-
-    def _cb(hwnd, _lp):  # noqa: ANN001
-        kids.append(int(hwnd))
-        return 1
-
-    ctypes.windll.user32.EnumChildWindows(parent, WNDENUMPROC(_cb), 0)
-    return kids
-
-
-def _apply_cutout(hwnd: int) -> None:
-    """Chroma color-key — only for experimental PET_ALPHA=1."""
-    if not hwnd or sys.platform != "win32":
-        return
-    _apply_colorkey_hwnd(hwnd)
-    for child in _enum_child_hwnds(hwnd):
-        _apply_colorkey_hwnd(child)
-
-
-def _style_tool_topmost(hwnd: int, opaque: bool | None = None) -> None:
-    """Tool window + topmost. Opaque path never touches LWA_COLORKEY / child layering."""
-    if not hwnd or sys.platform != "win32":
-        return
-    if opaque is None:
-        opaque = _opaque_mode
-    user32 = ctypes.windll.user32
-    GWL_EXSTYLE = -20
-    WS_EX_TOOLWINDOW = 0x00000080
-    WS_EX_APPWINDOW = 0x00040000
-    WS_EX_LAYERED = 0x00080000
-    WS_EX_TOPMOST = 0x00000008
-    HWND_TOPMOST = -1
-    SWP_NOMOVE = 0x0002
-    SWP_NOSIZE = 0x0001
-    SWP_NOACTIVATE = 0x0010
-    SWP_FRAMECHANGED = 0x0020
-    SWP_SHOWWINDOW = 0x0040
-
-    style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    style = (style | WS_EX_TOOLWINDOW | WS_EX_TOPMOST) & ~WS_EX_APPWINDOW
-    if opaque:
-        # Layered + color-key is what left the white ghost — stay non-layered.
-        style &= ~WS_EX_LAYERED
-    else:
-        style |= WS_EX_LAYERED
-    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
-    if not opaque:
-        _apply_cutout(hwnd)
-    user32.SetWindowPos(
-        hwnd,
-        HWND_TOPMOST,
-        0,
-        0,
-        0,
-        0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW,
-    )
-
-
-def _set_click_through(hwnd: int, enabled: bool) -> None:
-    if not hwnd or sys.platform != "win32":
-        return
-    user32 = ctypes.windll.user32
-    GWL_EXSTYLE = -20
-    WS_EX_TRANSPARENT = 0x00000020
-    WS_EX_LAYERED = 0x00080000
-    style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    if enabled:
-        # Need LAYERED for TRANSPARENT to behave; do not color-key in opaque mode.
-        style |= WS_EX_TRANSPARENT | WS_EX_LAYERED
-    else:
-        style &= ~WS_EX_TRANSPARENT
-        if _opaque_mode:
-            style &= ~WS_EX_LAYERED
-        else:
-            style |= WS_EX_LAYERED
-    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
-    if not _opaque_mode:
-        _apply_cutout(hwnd)
-
-
-def _start_tray(quit_cb) -> None:
-    """System tray “Quit pet” — works even when the WebView UI is wedged."""
-    if sys.platform != "win32":
-        return
-    try:
-        from System.Drawing import SystemIcons  # type: ignore
-        from System.Windows.Forms import ContextMenu, MenuItem, NotifyIcon  # type: ignore
-
-        ni = NotifyIcon()
-        ni.Icon = SystemIcons.Application
-        ni.Text = "Rocky pet"
-        ni.Visible = True
-        item = MenuItem("Quit pet")
-
-        def _on_quit(sender, args):  # noqa: ARG001
-            try:
-                ni.Visible = False
-            except Exception:
-                pass
-            quit_cb()
-
-        item.Click += _on_quit
-        menu = ContextMenu()
-        menu.MenuItems.Add(item)
-        ni.ContextMenu = menu
-        fw_tray_ref[0] = ni
-        print("pet: tray Quit pet ready", flush=True)
-    except Exception as e:
-        print(f"pet: tray unavailable ({e})", flush=True)
-
-
-fw_tray_ref: list = [None]
-
-
-class _PetApi:
-    """JS bridge from /face."""
-
-    def __init__(self) -> None:
-        self.on_ready = None  # type: ignore
-
-    def _alive(self) -> bool:
-        return not _disposed and _window is not None
-
-    def pet_ready(self) -> None:
-        if not self._alive():
-            return
-        print("pet: rockyReady", flush=True)
-        cb = self.on_ready
-        if callable(cb):
-            try:
-                cb()
-            except Exception:
-                pass
-
-    def pet_log(self, msg: str) -> None:
-        if _disposed:
-            return
-        print(f"pet: {msg}", flush=True)
-
-    def update_hit_rect(self, left: float, top: float, right: float, bottom: float) -> None:
-        global _hit_screen
-        if not self._alive():
-            return
-        with _lock:
-            win = _window
-            if win is None:
-                _hit_screen = None
-                return
-            try:
-                wx, wy = int(win.x), int(win.y)
-            except Exception:
-                wx, wy = _pet_xy()
-            _hit_screen = (wx + left, wy + top, wx + right, wy + bottom)
-
-    def open_console(self) -> None:
-        if not self._alive():
-            return
-        webbrowser.open(console_url())
-
-    def quit_face(self) -> None:
-        global _disposed, _window
-        if _disposed:
-            return
-        print("pet: quit requested", flush=True)
-        _disposed = True
-        win = _window
-        hwnd = _hwnd or (_resolve_hwnd(win) if win is not None else 0)
-        _window = None
-        if win is not None:
-            try:
-                win.destroy()
-            except Exception as e:
-                print(f"pet: destroy after quit: {e}", flush=True)
-        _force_destroy_hwnd(hwnd)
-
-
-def _dock_and_chrome_loop() -> None:
-    """Keep pet on the chosen monitor/corner; click-through off the body."""
-    global _hwnd, _click_through
-    while True:
-        time.sleep(0.25)
-        if _disposed:
-            return
-        win = _window
-        if win is None:
-            continue
-        try:
-            if not _hwnd:
-                _hwnd = _resolve_hwnd(win)
-                if _hwnd:
-                    _style_tool_topmost(_hwnd, opaque=_opaque_mode)
-            x, y = _pet_xy()
-            try:
-                if abs(int(win.x) - x) > 2 or abs(int(win.y) - y) > 2:
-                    win.move(x, y)
-            except Exception:
-                pass
-            try:
-                if abs(int(win.width) - PET_W) > 4 or abs(int(win.height) - PET_H) > 4:
-                    win.resize(PET_W, PET_H)
-                    win.move(*_pet_xy())
-            except Exception:
-                pass
-            if _hwnd and sys.platform == "win32":
-                pt = wintypes.POINT()
-                ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-                with _lock:
-                    hit = _hit_screen
-                over = bool(
-                    hit
-                    and hit[0] <= pt.x <= hit[2]
-                    and hit[1] <= pt.y <= hit[3]
-                )
-                want_through = not over
-                if want_through != _click_through:
-                    _set_click_through(_hwnd, want_through)
-                    _click_through = want_through
-                    if not want_through:
-                        _style_tool_topmost(_hwnd, opaque=_opaque_mode)
-        except Exception:
-            if _disposed:
-                return
-            pass
+        return left + PET_MARGIN, bottom - PET_H - PET_MARGIN
+    if corner == "top-right":
+        return right - PET_W - PET_MARGIN, top + PET_MARGIN
+    if corner == "top-left":
+        return left + PET_MARGIN, top + PET_MARGIN
+    return right - PET_W - PET_MARGIN, bottom - PET_H - PET_MARGIN
 
 
 def open_face_window() -> None:
-    """Spawn the desk-pet child (never blocks brain.main / STT)."""
+    """Spawn the GL pet child — never blocks brain.main / STT."""
     global _proc
     apply_saved_dock()
-    url = face_url()
-    print(f"face: {url}", flush=True)
-    print(f"face: dock monitor={config.PET_MONITOR} corner={config.PET_CORNER}", flush=True)
+    print(f"face: console {console_url()}", flush=True)
+    print(
+        f"face: dock monitor={config.PET_MONITOR} corner={config.PET_CORNER}",
+        flush=True,
+    )
     if not config.OPEN_FACE:
         print("face: auto-open off (OPEN_FACE=0)", flush=True)
         return
 
-    def _spawn(opaque_force: bool = False) -> None:
+    def _spawn() -> None:
         global _proc
-        time.sleep(0.4)
+        time.sleep(0.35)
         if _proc is not None and _proc.poll() is None:
             return
         py = sys.executable
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
-        if opaque_force:
-            env["PET_ALPHA"] = "0"
-            mark_opaque_fallback()
-        mode = "opaque" if (opaque_force or is_opaque_mode()) else "chroma"
         try:
             _proc = subprocess.Popen(
-                [py, "-m", "brain.face_pet", url, mode],
+                [py, "-m", "brain.face_pet"],
                 cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 env=env,
                 stdout=None,
                 stderr=None,
             )
             print(
-                f"face: desk pet {PET_W}x{PET_H} sidecar mode={mode} "
+                f"face: GL pet {PET_W}x{PET_H} "
                 f"(monitor {config.PET_MONITOR} {config.PET_CORNER}, pid={_proc.pid})",
                 flush=True,
             )
         except Exception as e:
-            print(f"face: could not start pet ({e}) — visit {url}", flush=True)
+            print(f"face: could not start pet ({e})", flush=True)
             return
 
         def _reap() -> None:
-            global _proc
             proc = _proc
             if proc is None:
                 return
             code = proc.wait()
             print(f"face: pet exited code={code}", flush=True)
-            if code == 2 and mode == "chroma":
-                print("face: respawning opaque after load timeout", flush=True)
-                _proc = None
-                _spawn(opaque_force=True)
-            elif code == 2:
-                print("pet: load timeout — blank/veil destroyed; not respawning", flush=True)
 
         threading.Thread(target=_reap, daemon=True, name="rocky-face-reap").start()
 

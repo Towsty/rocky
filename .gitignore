@@ -5,5 +5,7 @@ server/**/__pycache__/
 server/debug/
 server/.env
 server/pet_dock.json
+server/pet-ui.json
+server/pet_mode.json
 .env*
 !.env.example
