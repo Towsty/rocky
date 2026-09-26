@@ -6,12 +6,14 @@ Started by brain.face_window as a child of python -m brain.main:
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
 import webbrowser
 
 from .face_window import (
+    CHROMA_KEY,
     PET_H,
     PET_W,
     _PetApi,
@@ -31,6 +33,11 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     url = argv[0] if argv else "http://127.0.0.1:8766/face"
     apply_saved_dock()
+    # GPU compositing ignores LWA_COLORKEY on WebView2; software path keys correctly.
+    os.environ.setdefault(
+        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+        "--disable-gpu --disable-gpu-compositing",
+    )
     try:
         import webview
     except ImportError:
@@ -39,8 +46,9 @@ def main(argv: list[str] | None = None) -> int:
 
     x, y = _pet_xy()
     api = _PetApi()
-    # pywebview rejects #RRGGBBAA. Real cutout is chroma-key + transparent WebView
-    # (see face_window.CHROMA_KEY / face.html page background).
+    # Cutout = opaque chroma everywhere + LWA_COLORKEY (see face_window.CHROMA_KEY).
+    # pywebview transparent=True sets WebView2 DefaultBackground=Transparent, which
+    # leaves a black WebGL card that cannot be keyed — so leave transparent=False.
     window = webview.create_window(
         title="Rocky",
         url=url,
@@ -53,26 +61,25 @@ def main(argv: list[str] | None = None) -> int:
         easy_drag=False,
         on_top=True,
         focus=False,
-        transparent=True,
-        background_color="#000000",
+        transparent=False,
+        background_color=CHROMA_KEY,
         shadow=False,
         js_api=api,
     )
     fw._window = window
 
     def _shown() -> None:
-        time.sleep(0.25)
-        fw._hwnd = _resolve_hwnd(window)
-        _force_form_chroma(window)
-        _style_tool_topmost(fw._hwnd)
-        try:
-            window.resize(PET_W, PET_H)
-        except Exception:
-            pass
-        try:
-            window.move(*_pet_xy())
-        except Exception:
-            pass
+        # WebView2 children appear after first paint — retry cutout a few times.
+        for delay in (0.2, 0.6, 1.2, 2.0):
+            time.sleep(delay)
+            fw._hwnd = _resolve_hwnd(window)
+            _force_form_chroma(window)
+            _style_tool_topmost(fw._hwnd)
+            try:
+                window.resize(PET_W, PET_H)
+                window.move(*_pet_xy())
+            except Exception:
+                pass
 
     try:
         window.events.shown += lambda: threading.Thread(target=_shown, daemon=True).start()
@@ -81,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
 
     threading.Thread(target=_dock_and_chrome_loop, daemon=True).start()
     print(
-        f"face: desk pet {PET_W}x{PET_H} cutout via pywebview "
+        f"face: desk pet {PET_W}x{PET_H} chroma-cutout via pywebview "
         f"(monitor={config.PET_MONITOR} corner={config.PET_CORNER})",
         flush=True,
     )

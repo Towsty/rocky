@@ -20,12 +20,12 @@ from pathlib import Path
 from . import config
 
 # Tall enough for full head + antenna + soft contact shadow padding.
-PET_W = 280
-PET_H = 360
+PET_W = 300
+PET_H = 400
 PET_MARGIN = 8
-# WinForms/WebView2 cannot do true per-pixel #00000000 cutouts without a solid
-# letterbox. Chroma-key this color (also used as the HTML page background) so
-# wallpaper shows through while opaque WebGL pixels stay. Must not appear on Rocky.
+# WinForms/WebView2 cutout: same opaque chroma on Form, WebView2 DefaultBackground,
+# HTML body, and WebGL clear — then LWA_COLORKEY punches it to the desktop.
+# (True #00000000 alpha does not cut out WebGL in Edge WebView2.)
 CHROMA_KEY = "#00FE01"
 _DOCK_FILE = Path(__file__).resolve().parent.parent / "pet_dock.json"
 _CORNERS = ("bottom-right", "bottom-left", "top-right", "top-left")
@@ -222,29 +222,69 @@ def _chroma_colorref() -> int:
     return r | (g << 8) | (b << 16)
 
 
-def _apply_cutout(hwnd: int) -> None:
-    """Layered chroma-key so empty pixels are desktop, not a gray/black card."""
-    if not hwnd or sys.platform != "win32":
+def _chroma_drawing_color():
+    from System.Drawing import ColorTranslator  # type: ignore
+
+    return ColorTranslator.FromHtml(CHROMA_KEY)
+
+
+def _apply_colorkey_hwnd(hwnd: int) -> None:
+    if not hwnd:
         return
     user32 = ctypes.windll.user32
     GWL_EXSTYLE = -20
     WS_EX_LAYERED = 0x00080000
     LWA_COLORKEY = 0x00000001
     style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    if not (style & WS_EX_LAYERED):
-        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
+    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
     user32.SetLayeredWindowAttributes(hwnd, _chroma_colorref(), 255, LWA_COLORKEY)
 
 
+def _enum_child_hwnds(parent: int) -> list[int]:
+    kids: list[int] = []
+    if not parent:
+        return kids
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HWND, wintypes.LPARAM)
+
+    def _cb(hwnd, _lp):  # noqa: ANN001
+        kids.append(int(hwnd))
+        return 1
+
+    ctypes.windll.user32.EnumChildWindows(parent, WNDENUMPROC(_cb), 0)
+    return kids
+
+
+def _apply_cutout(hwnd: int) -> None:
+    """Color-key the form and WebView2 child surfaces so chroma pixels vanish."""
+    if not hwnd or sys.platform != "win32":
+        return
+    _apply_colorkey_hwnd(hwnd)
+    for child in _enum_child_hwnds(hwnd):
+        _apply_colorkey_hwnd(child)
+
+
 def _force_form_chroma(window) -> None:
-    """Match WinForms BackColor to the HTML chroma plate (keyed via Win32)."""
+    """Form + WebView2 DefaultBackground = opaque chroma (required for cutout)."""
     native = getattr(window, "native", None)
     if native is None:
         return
     try:
-        from System.Drawing import ColorTranslator  # type: ignore
-
-        native.BackColor = ColorTranslator.FromHtml(CHROMA_KEY)
+        c = _chroma_drawing_color()
+        native.BackColor = c
+        # Prefer opaque chroma on the browser surface — Transparent leaves a black
+        # WebGL letterbox that color-key cannot punch.
+        browser = getattr(native, "webview", None) or getattr(native, "browser", None)
+        ctrl = None
+        if browser is not None:
+            ctrl = getattr(browser, "webview", None) or browser
+        if ctrl is None:
+            try:
+                if native.Controls.Count > 0:
+                    ctrl = native.Controls[0]
+            except Exception:
+                ctrl = None
+        if ctrl is not None and hasattr(ctrl, "DefaultBackgroundColor"):
+            ctrl.DefaultBackgroundColor = c
     except Exception:
         pass
 
@@ -293,7 +333,6 @@ def _set_click_through(hwnd: int, enabled: bool) -> None:
     else:
         style = (style | WS_EX_LAYERED) & ~WS_EX_TRANSPARENT
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
-    # Style changes clear layered attrs — re-apply chroma cutout.
     _apply_cutout(hwnd)
 
 
@@ -328,8 +367,10 @@ class _PetApi:
 def _dock_and_chrome_loop() -> None:
     """Keep pet on the chosen monitor/corner work area; click-through off the body."""
     global _hwnd, _click_through
+    ticks = 0
     while True:
         time.sleep(0.25)
+        ticks += 1
         win = _window
         if win is None:
             continue
@@ -339,6 +380,10 @@ def _dock_and_chrome_loop() -> None:
                 if _hwnd:
                     _force_form_chroma(win)
                     _style_tool_topmost(_hwnd)
+            # Re-key children periodically — WebView2 spawns late HWNDs.
+            if _hwnd and ticks % 8 == 0:
+                _force_form_chroma(win)
+                _apply_cutout(_hwnd)
             x, y = _pet_xy()
             try:
                 if abs(int(win.x) - x) > 2 or abs(int(win.y) - y) > 2:
@@ -346,7 +391,6 @@ def _dock_and_chrome_loop() -> None:
             except Exception:
                 pass
             try:
-                # Keep docked size if DPI/scale drifted.
                 if abs(int(win.width) - PET_W) > 4 or abs(int(win.height) - PET_H) > 4:
                     win.resize(PET_W, PET_H)
                     win.move(*_pet_xy())

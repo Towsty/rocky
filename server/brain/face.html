@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rocky</title>
 <style>
-  /* Chroma plate: WinForms keys out #00FE01 so wallpaper shows (not a gray card).
-     Must match face_window.CHROMA_KEY. Canvas clears to alpha 0 over this. */
+  /* Chroma plate #00FE01 — must match face_window.CHROMA_KEY and WebGL clear.
+     Win32 LWA_COLORKEY punches this to the desktop (WebGL alpha-0 becomes a black card). */
   html, body {
     margin: 0; padding: 0; width: 100%; height: 100%;
     overflow: hidden;
@@ -79,7 +79,10 @@ let poseName = "neutral";
 const renderer = new THREE.WebGLRenderer({
   canvas, alpha: true, antialias: true, premultipliedAlpha: true,
 });
-renderer.setClearColor(0x000000, 0);
+// Opaque chroma clear (not alpha-0 black). OS color-keys #00FE01 → wallpaper.
+// Matching face_window.CHROMA_KEY / page CSS.
+const CHROMA = 0x00fe01;
+renderer.setClearColor(CHROMA, 1);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.08;
@@ -87,10 +90,10 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
 scene.background = null;
-// Pull back + slight down so full skull, antenna, and soft shadow fit with padding.
-const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 40);
-camera.position.set(0, 0.05, 5.2);
-camera.lookAt(0, -0.05, 0);
+// Full skull + antenna + padding — never clip the head.
+const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 40);
+camera.position.set(0, 0.02, 5.8);
+camera.lookAt(0, -0.08, 0);
 
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -323,8 +326,8 @@ function applySpots(blinkSquint) {
 setEmotion("neutral");
 
 function resize() {
-  const w = canvas.clientWidth || 280;
-  const h = canvas.clientHeight || 360;
+  const w = canvas.clientWidth || 300;
+  const h = canvas.clientHeight || 400;
   renderer.setSize(w, h, false);
   camera.aspect = w / Math.max(h, 1);
   camera.updateProjectionMatrix();
