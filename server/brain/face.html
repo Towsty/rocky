@@ -131,6 +131,8 @@ const accentMat = new THREE.MeshPhysicalMaterial({
 });
 const visorMat = new THREE.MeshPhysicalMaterial({
   color: 0x0a121c,
+  emissive: 0x0a3048,
+  emissiveIntensity: 0,
   roughness: 0.12,
   metalness: 0.55,
   clearcoat: 1.0,
@@ -354,11 +356,10 @@ function animate(t) {
     speakPhase += dt * 11;
     y += Math.abs(Math.sin(speakPhase)) * 0.02;
     chest.material.emissiveIntensity = 0.55 + 0.45 * Math.abs(Math.sin(speakPhase));
-    visor.material.emissive = new THREE.Color(0x0a3048);
     visor.material.emissiveIntensity = 0.15 + 0.2 * Math.abs(Math.sin(speakPhase));
   } else {
     chest.material.emissiveIntensity = THREE.MathUtils.lerp(chest.material.emissiveIntensity, poseName === "happy" ? 0.85 : 0.55, 0.1);
-    visor.material.emissiveIntensity = THREE.MathUtils.lerp(visor.material.emissiveIntensity || 0, 0, 0.1);
+    visor.material.emissiveIntensity = THREE.MathUtils.lerp(visor.material.emissiveIntensity, 0, 0.1);
   }
   root.position.y = THREE.MathUtils.lerp(root.position.y, slumped ? -0.22 : y, 0.1);
   root.rotation.z = THREE.MathUtils.lerp(root.rotation.z, Math.sin(swayT * 1.1) * (slumped ? 0.04 : 0.03) + (slumped ? 0.2 : 0), 0.08);
