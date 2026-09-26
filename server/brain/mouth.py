@@ -47,12 +47,14 @@ def fish_available() -> bool:
 
 
 def announce_fish() -> None:
-    """Startup line: endpoint + paid model + voice id (never the API key)."""
+    """Startup line: endpoint + model + voice id (never the API key)."""
+    model = config.fish_tts_model()
+    print(f"fish model: {model}")
     if not fish_available():
         print("Fish TTS: off (set FISH_AUDIO_API_KEY and TTS_VOICE_ID for Rocky's voice)")
         return
     print(
-        f"Fish TTS: {FISH_TTS_URL}  model={config.FISH_TTS_MODEL}  "
+        f"Fish TTS: {FISH_TTS_URL}  model={model}  "
         f"voice={config.TTS_VOICE_ID}"
     )
 
@@ -102,12 +104,10 @@ _fish_announced_ok = False
 def _fish_stream(text: str) -> Iterator[bytes]:
     """Raw 16 kHz PCM from Fish Audio, yielded as the server produces it.
 
-    Model is the paid developer-API header (FISH_TTS_MODEL), not the website
-    free tier. Omitting the header used to fall through to whatever Fish
-    defaults — we always send an explicit paid model.
+    Model comes from FISH_TTS_MODEL (env / .env) via config.fish_tts_model().
     """
     global _fish_announced_ok
-    model = config.FISH_TTS_MODEL
+    model = config.fish_tts_model()
     body = json.dumps(
         {
             "text": text,
@@ -126,7 +126,7 @@ def _fish_stream(text: str) -> Iterator[bytes]:
         headers={
             "Authorization": f"Bearer {os.environ['FISH_AUDIO_API_KEY']}",
             "Content-Type": "application/json",
-            "model": model,  # Fish OpenAPI: paid s1 / s2-pro / s2.1-pro (not s2.1-pro-free)
+            "model": model,
         },
     )
     # python.org builds of Python on macOS don't see the system root certs;

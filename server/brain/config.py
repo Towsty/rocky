@@ -5,17 +5,25 @@ from pathlib import Path
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
 # API keys live in server/.env (git-ignored; see .env.example), one KEY=VALUE
-# per line. Anything already exported in the shell wins over the file.
+# per line. Anything already exported in the shell wins over the file, except
+# FISH_TTS_MODEL — the .env value always wins so a saved model switch is not
+# stuck behind a stale shell export.
 _ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+_FISH_MODEL_FROM_FILE: str | None = None
 if _ENV_FILE.is_file():
     for _line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
         _line = _line.strip()
         if not _line or _line.startswith("#") or "=" not in _line:
             continue
         _k, _v = _line.split("=", 1)
-        _v = _v.strip().strip("'\"")
-        if _v:  # a blank line in .env means "not set", not "set to nothing"
-            os.environ.setdefault(_k.strip(), _v)
+        _k, _v = _k.strip(), _v.strip().strip("'\"")
+        if not _v:  # a blank line in .env means "not set", not "set to nothing"
+            continue
+        if _k == "FISH_TTS_MODEL":
+            _FISH_MODEL_FROM_FILE = _v
+            os.environ["FISH_TTS_MODEL"] = _v
+        else:
+            os.environ.setdefault(_k, _v)
 
 # The robot's name — the wake word is "hey <name>".
 ROBOT_NAME = "Rocky"
@@ -70,9 +78,16 @@ PORT = 8765
 # The console page has sliders for level / bass cut / presence that apply
 # live; set the winners here to keep them.
 TTS_VOICE_ID = os.environ.get("TTS_VOICE_ID", "6dd07916890445e59c5f019ad0fc7879")
-# Fish developer TTS model (HTTP header `model`). Paid API: s1 / s2-pro / s2.1-pro.
-# Do not use s2.1-pro-free (website/free tier). Empty API wallet → HTTP 402.
-FISH_TTS_MODEL = os.environ.get("FISH_TTS_MODEL", "s2-pro")
+# Fish TTS HTTP header `model` (s1 / s2-pro / s2.1-pro / s2.1-pro-free).
+# Set FISH_TTS_MODEL in server/.env. Default matches the free developer tier.
+FISH_TTS_MODEL = os.environ.get("FISH_TTS_MODEL", "s2.1-pro-free")
+
+
+def fish_tts_model() -> str:
+    """Model string sent on the Fish request — live env / .env, not a stale import."""
+    return (os.environ.get("FISH_TTS_MODEL") or FISH_TTS_MODEL or "s2.1-pro-free").strip()
+
+
 TTS_TEMPERATURE = 0.4
 TTS_TOP_P = 0.6
 REPLY_MAX_SENTENCES = 3
