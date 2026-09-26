@@ -5,18 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rocky</title>
 <style>
-  /* Chroma plate #00FE01 — must match face_window.CHROMA_KEY and WebGL clear.
-     Win32 LWA_COLORKEY punches this to the desktop (WebGL alpha-0 becomes a black card). */
   html, body {
     margin: 0; padding: 0; width: 100%; height: 100%;
     overflow: hidden;
-    background: #00FE01 !important;
-    background-color: #00FE01 !important;
+    background: #0a1018 !important;
+    background-color: #0a1018 !important;
     font-family: "Segoe UI", system-ui, sans-serif;
     user-select: none;
     -webkit-user-select: none;
   }
-  #stage { position: relative; width: 100%; height: 100%; background: #00FE01 !important; }
+  html.chroma, html.chroma body, html.chroma #stage {
+    background: #00FE01 !important;
+    background-color: #00FE01 !important;
+  }
+  #stage { position: relative; width: 100%; height: 100%; background: #0a1018 !important; }
   #c { display: block; width: 100%; height: 100%; background: transparent !important; }
   #bubble {
     display: none; position: absolute; left: 8px; right: 8px; top: 8px;
@@ -48,6 +50,15 @@
     <div id="menu" role="menu"></div>
     <canvas id="c"></canvas>
   </div>
+<script>
+  // If the ES module never loads (CDN hang), watchdog still needs a log line.
+  window.rockyReady = false;
+  setTimeout(function () {
+    if (!window.rockyReady) {
+      try { window.pywebview.api.pet_log("still loading @2.5s"); } catch (e) {}
+    }
+  }, 2500);
+</script>
 <script type="importmap">
 {
   "imports": {
@@ -59,6 +70,30 @@
 <script type="module">
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+const params = new URLSearchParams(location.search);
+const CHROMA_MODE = params.get("mode") === "chroma";
+if (CHROMA_MODE) document.documentElement.classList.add("chroma");
+
+window.rockyReady = false;
+function petLog(msg) {
+  try { console.log("pet:", msg); } catch (_) {}
+  try { window.pywebview?.api?.pet_log?.(String(msg)); } catch (_) {}
+}
+function signalReady(why) {
+  if (window.rockyReady) return;
+  window.rockyReady = true;
+  petLog("ready (" + why + ")");
+  try { window.pywebview?.api?.pet_ready?.(); } catch (_) {}
+}
+petLog(CHROMA_MODE ? "boot chroma" : "boot opaque");
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") {
+    petLog("Esc → quit");
+    try { window.pywebview?.api?.quit_face?.(); } catch (_) {}
+  }
+});
 
 const EMOTIONS = ["neutral","happy","sad","angry","surprised","sleepy","thinking"];
 const canvas = document.getElementById("c");
@@ -76,13 +111,21 @@ let nextBlink = 2.8;
 let swayT = 0;
 let poseName = "neutral";
 
-const renderer = new THREE.WebGLRenderer({
-  canvas, alpha: true, antialias: true, premultipliedAlpha: true,
-});
-// Opaque chroma clear (not alpha-0 black). OS color-keys #00FE01 → wallpaper.
-// Matching face_window.CHROMA_KEY / page CSS.
-const CHROMA = 0x00fe01;
-renderer.setClearColor(CHROMA, 1);
+let renderer;
+try {
+  petLog("WebGL create…");
+  renderer = new THREE.WebGLRenderer({
+    canvas, alpha: true, antialias: true, premultipliedAlpha: true,
+  });
+  petLog("WebGL ok");
+} catch (e) {
+  petLog("WebGL FAIL: " + e);
+  signalReady("webgl-fail");
+  throw e;
+}
+// Opaque: dark clear. Chroma: keyed green (experimental only).
+const CLEAR = CHROMA_MODE ? 0x00fe01 : 0x0a1018;
+renderer.setClearColor(CLEAR, 1);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.08;
@@ -90,13 +133,17 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
 scene.background = null;
-// Full skull + antenna + padding — never clip the head.
 const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 40);
 camera.position.set(0, 0.02, 5.8);
 camera.lookAt(0, -0.08, 0);
 
-const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+try {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  petLog("envmap ok");
+} catch (e) {
+  petLog("envmap skip: " + e);
+}
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 const key = new THREE.DirectionalLight(0xffffff, 1.4);
@@ -389,14 +436,15 @@ function animate(t) {
   shadow.scale.setScalar(slumped ? 0.85 : 1 + Math.sin(swayT * 1.55) * 0.035);
 
   renderer.render(scene, camera);
+  if (!window.rockyReady) signalReady("first-frame");
   reportHitRect();
 }
 requestAnimationFrame(animate);
+petLog("animate loop started");
 
 function reportHitRect() {
   if (!window.pywebview?.api?.update_hit_rect) return;
   const r = canvas.getBoundingClientRect();
-  // Generous vertical hit so antenna/head count; side padding stays click-through.
   const padX = r.width * 0.22;
   const padTop = r.height * 0.06;
   const padBot = r.height * 0.1;
@@ -443,7 +491,7 @@ function buildMenu() {
     `<button type="button" data-act="sleep">${state.awake ? "Sleep" : "Wake"}</button>`,
     `<button type="button" data-act="listen">${state.listening ? "Stop listen" : "Listen"}</button>`,
     `<button type="button" data-act="console">Open console</button>`,
-    `<button type="button" data-act="quit">Quit face</button>`,
+    `<button type="button" data-act="quit">Quit pet</button>`,
     `<div class="sep">Monitor</div>`,
   ];
   const n = Math.max(1, state.monitors | 0);
