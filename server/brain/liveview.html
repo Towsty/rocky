@@ -191,6 +191,12 @@
         <div class="faces" id="faces"></div>
       </div>
       <div class="card">
+        <h2 class="label"><span>Desk pet</span><span class="sub" id="docknote">—</span></h2>
+        <div class="row" id="dockmonitors"></div>
+        <div class="row" id="dockcorners" style="margin-top:8px"></div>
+        <p class="hint">PET_MONITOR / PET_CORNER · sits on the work area above the taskbar · also via pet right-click</p>
+      </div>
+      <div class="card">
         <h2 class="label"><span>Voice</span></h2>
         <div class="field"><span class="k">Volume</span><input type="range" id="vol" min="0" max="1" step="0.05" value="0.7" aria-label="volume"><span class="v" id="volv">0.70</span></div>
         <form class="row" id="sayform">
@@ -263,6 +269,37 @@
     const b = document.createElement("button"); b.textContent = e; b.dataset.emotion = e;
     b.onclick = () => act("emotion", { name: e });
     faces.appendChild(b);
+  }
+  const CORNERS = ["bottom-right", "bottom-left", "top-right", "top-left"];
+  function syncDockUi(s) {
+    const n = Math.max(1, s.pet_monitors | 0);
+    const mon = s.pet_monitor ?? 0;
+    const corner = s.pet_corner || "bottom-right";
+    $("docknote").textContent = "monitor " + mon + " · " + corner;
+    const mrow = $("dockmonitors");
+    if (mrow.children.length !== n) {
+      mrow.innerHTML = "";
+      for (let i = 0; i < n; i++) {
+        const b = document.createElement("button");
+        b.textContent = "Monitor " + i;
+        b.dataset.monitor = String(i);
+        b.onclick = () => act("pet_dock", { monitor: i, corner: status.pet_corner || "bottom-right" }, "Pet → monitor " + i);
+        mrow.appendChild(b);
+      }
+    }
+    for (const b of mrow.children) b.classList.toggle("active", +b.dataset.monitor === mon);
+    const crow = $("dockcorners");
+    if (crow.children.length !== CORNERS.length) {
+      crow.innerHTML = "";
+      for (const c of CORNERS) {
+        const b = document.createElement("button");
+        b.textContent = c;
+        b.dataset.corner = c;
+        b.onclick = () => act("pet_dock", { monitor: status.pet_monitor ?? 0, corner: c }, "Pet → " + c);
+        crow.appendChild(b);
+      }
+    }
+    for (const b of crow.children) b.classList.toggle("active", b.dataset.corner === corner);
   }
   let headTimer;
   function headChanged() {
@@ -363,6 +400,7 @@
       if (!dragging.has("tilt")) { $("tilt").value = Math.round(tilt); $("tiltv").textContent = Math.round(tilt) + "°"; }
       if (s.volume != null && document.activeElement !== $("vol")) { $("vol").value = s.volume; $("volv").textContent = (+s.volume).toFixed(2); }
       for (const b of faces.children) b.classList.toggle("active", b.dataset.emotion === s.emotion);
+      syncDockUi(s);
       $("trackbtn").classList.toggle("active", !!s.tracking_enabled);
       $("trackbtn").textContent = s.tracking_enabled ? "Stop following" : "Follow my face";
       $("heard").textContent = s.last_heard || ""; $("said").textContent = s.last_said || "";

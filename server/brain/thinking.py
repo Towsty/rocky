@@ -57,16 +57,37 @@ def _clock_context_line() -> str:
         except Exception:
             now = datetime.now()
             tz_name = "local"
-    # "three twenty" style for Rocky's short answers; also give 24h for clarity.
-    hour12 = now.strftime("%I").lstrip("0") or "12"
-    minute = now.strftime("%M")
-    ampm = now.strftime("%p").lower()
-    spoken = f"{hour12}:{minute} {ampm}"
+    hour = now.hour % 12 or 12
+    minute = now.minute
+    ampm = "am" if now.hour < 12 else "pm"
+    # Word form for short answers ("three twenty").
+    _ones = (
+        "twelve", "one", "two", "three", "four", "five", "six",
+        "seven", "eight", "nine", "ten", "eleven", "twelve",
+    )
+    _tens = ("", "", "twenty", "thirty", "forty", "fifty")
+    h_word = _ones[hour]
+    if minute == 0:
+        m_word = "o'clock"
+    elif minute < 10:
+        m_word = f"oh {_ones[minute]}"
+    elif minute < 20:
+        teens = (
+            "ten", "eleven", "twelve", "thirteen", "fourteen",
+            "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
+        )
+        m_word = teens[minute - 10]
+    else:
+        m_word = _tens[minute // 10] + (f" {_ones[minute % 10]}" if minute % 10 else "")
+    spoken = f"{h_word} {m_word}"
     weekday = now.strftime("%A")
+    digital = f"{hour}:{minute:02d} {ampm}"
     return (
-        f"(context, not spoken: local clock is {weekday} {spoken}, "
-        f"timezone {tz_name}, iso {now.isoformat(timespec='minutes')}. "
-        f"You know the time from this line. You do not have a camera unless a picture is attached.)"
+        f"(context, not spoken: local clock is {weekday} {digital} "
+        f"(spoken form: {spoken}), timezone {tz_name}, "
+        f"iso {now.isoformat(timespec='minutes')}. "
+        f"If asked the time, answer from this clock like '{spoken}'. "
+        f"You do not have a camera unless a picture is attached. No weather.)"
     )
 
 

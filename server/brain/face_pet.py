@@ -38,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
 
     x, y = _pet_xy()
     api = _PetApi()
+    # pywebview only accepts #RGB / #RRGGBB (not #RRGGBBAA). Transparency is
+    # the separate `transparent=True` flag — black is fully cleared on Windows.
     window = webview.create_window(
         title="Rocky",
         url=url,

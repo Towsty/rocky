@@ -182,6 +182,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
 
 async def handle_console_line(line: str) -> bool:
     """Returns False when the server should shut down."""
+    global awake_until
     line = line.strip()
     if not line:
         return True
@@ -196,6 +197,10 @@ async def handle_console_line(line: str) -> bool:
     elif cmd == "emo":
         if arg in config.EMOTIONS:
             await send_to_robot({"type": "emotion", "name": arg})
+            if arg != "sleepy":
+                awake_until = time.time() + config.AWAKE_SECONDS
+            else:
+                awake_until = max(awake_until, time.time() + 8.0)
         else:
             print(f"emotions: {', '.join(config.EMOTIONS)}")
     elif cmd in ("pan", "tilt"):
@@ -664,11 +669,13 @@ async def _console_command(action: str, payload: dict) -> dict:
         if name not in config.EMOTIONS:
             raise ValueError(f"emotions: {', '.join(config.EMOTIONS)}")
         await send_to_robot({"type": "emotion", "name": name})
-        # Console / pet emotion picks should show immediately — wake unless sleepy.
-        if name == "sleepy":
-            awake_until = 0.0
-        else:
+        # Face pet reads /status.emotion — send_to_robot already set current_emotion.
+        # Wake so the pose is visible (sleepy is a pose while awake; Sleep button dozes).
+        if name != "sleepy":
             awake_until = time.time() + config.AWAKE_SECONDS
+        else:
+            # Keep him "awake" enough for the sleepy pose (70% lids), not full shut.
+            awake_until = max(awake_until, time.time() + 8.0)
     elif action == "head":
         pan = _number(payload, "pan", -config.TRACK_PAN_LIMIT, config.TRACK_PAN_LIMIT)
         tilt = _number(payload, "tilt", config.TRACK_TILT_MIN, config.TRACK_TILT_MAX)

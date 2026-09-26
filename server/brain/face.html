@@ -222,47 +222,49 @@ mouthO.visible = false;
 head.add(mouthO);
 
 const POSES = {
+  // lidOpen: 1 = open, 0 = shut. sleepy ≈ 0.3 ≈ 70% closed.
   neutral: {
     tip: 0x6ec6ff, cheeks: 0, eyeScale: 1, lidOpen: 1,
-    browY: 0.24, browRot: 0, browIn: 0,
-    mouthSmile: 0, mouthO: false, lookX: 0, lookY: 0,
+    browYL: 0.24, browYR: 0.24, browRotL: 0, browRotR: 0, browIn: 0,
+    mouthSmile: 0, mouthTight: 1, mouthO: false, lookX: 0, lookY: 0,
     headPitch: 0, headYaw: 0, bounce: 0, antennaTwitch: 0.08,
   },
   happy: {
-    tip: 0x7dffb0, cheeks: 0.9, eyeScale: 1.02, lidOpen: 0.88,
-    browY: 0.26, browRot: -0.15, browIn: 0,
-    mouthSmile: 1, mouthO: false, lookX: 0, lookY: 0.02,
-    headPitch: -0.05, headYaw: 0, bounce: 0.06, antennaTwitch: 0.12,
+    tip: 0x7dffb0, cheeks: 0.95, eyeScale: 1.04, lidOpen: 0.82,
+    browYL: 0.27, browYR: 0.27, browRotL: -0.2, browRotR: 0.2, browIn: 0,
+    mouthSmile: 1, mouthTight: 1.2, mouthO: false, lookX: 0, lookY: 0.02,
+    headPitch: -0.06, headYaw: 0, bounce: 0.09, antennaTwitch: 0.14,
   },
   sad: {
-    tip: 0x7aa0c8, cheeks: 0, eyeScale: 0.95, lidOpen: 0.55,
-    browY: 0.2, browRot: 0.35, browIn: 0.04,
-    mouthSmile: -1, mouthO: false, lookX: 0, lookY: -0.06,
-    headPitch: 0.22, headYaw: 0, bounce: 0, antennaTwitch: 0.03,
+    tip: 0x7aa0c8, cheeks: 0, eyeScale: 0.92, lidOpen: 0.42,
+    browYL: 0.18, browYR: 0.18, browRotL: 0.4, browRotR: -0.4, browIn: 0.05,
+    mouthSmile: -1, mouthTight: 1.05, mouthO: false, lookX: 0, lookY: -0.08,
+    headPitch: 0.28, headYaw: 0, bounce: 0, antennaTwitch: 0.03,
   },
   angry: {
-    tip: 0xff6b5a, cheeks: 0, eyeScale: 0.98, lidOpen: 0.75,
-    browY: 0.18, browRot: 0.45, browIn: 0.08,
-    mouthSmile: -0.35, mouthO: false, lookX: 0, lookY: 0.02,
-    headPitch: -0.08, headYaw: 0, bounce: 0, antennaTwitch: 0.05,
+    tip: 0xff6b5a, cheeks: 0, eyeScale: 0.96, lidOpen: 0.72,
+    browYL: 0.16, browYR: 0.16, browRotL: -0.55, browRotR: 0.55, browIn: 0.1,
+    mouthSmile: -0.4, mouthTight: 0.65, mouthO: false, lookX: 0, lookY: 0.03,
+    headPitch: -0.1, headYaw: 0, bounce: 0, antennaTwitch: 0.05,
   },
   surprised: {
-    tip: 0xffe066, cheeks: 0.5, eyeScale: 1.28, lidOpen: 1.15,
-    browY: 0.32, browRot: -0.25, browIn: -0.02,
-    mouthSmile: 0, mouthO: true, lookX: 0, lookY: 0.04,
-    headPitch: -0.12, headYaw: 0, bounce: 0.02, antennaTwitch: 0.18,
+    tip: 0xffe066, cheeks: 0.55, eyeScale: 1.38, lidOpen: 1.12,
+    browYL: 0.34, browYR: 0.34, browRotL: -0.2, browRotR: 0.2, browIn: -0.03,
+    mouthSmile: 0, mouthTight: 1, mouthO: true, lookX: 0, lookY: 0.05,
+    headPitch: -0.14, headYaw: 0, bounce: 0.03, antennaTwitch: 0.2,
   },
   sleepy: {
-    tip: 0x8a9bb0, cheeks: 0, eyeScale: 0.92, lidOpen: 0.28,
-    browY: 0.2, browRot: 0.1, browIn: 0,
-    mouthSmile: 0.15, mouthO: false, lookX: 0.02, lookY: -0.04,
-    headPitch: 0.38, headYaw: 0.08, bounce: 0, antennaTwitch: 0.02,
+    tip: 0x8a9bb0, cheeks: 0, eyeScale: 0.9, lidOpen: 0.3,
+    browYL: 0.2, browYR: 0.2, browRotL: 0.12, browRotR: -0.12, browIn: 0,
+    mouthSmile: 0.2, mouthTight: 0.95, mouthO: false, lookX: 0.02, lookY: -0.05,
+    headPitch: 0.4, headYaw: 0.1, bounce: 0, antennaTwitch: 0.02,
   },
   thinking: {
-    tip: 0xffc857, cheeks: 0, eyeScale: 1.0, lidOpen: 0.9,
-    browY: 0.28, browRot: -0.35, browIn: 0,
-    mouthSmile: 0.2, mouthO: false, lookX: 0.1, lookY: 0.03,
-    headPitch: 0.05, headYaw: -0.28, bounce: 0, antennaTwitch: 0.35,
+    tip: 0xffc857, cheeks: 0, eyeScale: 1.0, lidOpen: 0.92,
+    // one brow up (left), right stays near rest
+    browYL: 0.32, browYR: 0.23, browRotL: -0.45, browRotR: 0.08, browIn: 0,
+    mouthSmile: 0.15, mouthTight: 0.9, mouthO: false, lookX: 0.12, lookY: 0.02,
+    headPitch: 0.04, headYaw: -0.32, bounce: 0, antennaTwitch: 0.42,
   },
 };
 
@@ -275,20 +277,20 @@ function setEmotion(name) {
   mouth.visible = !pose.mouthO;
   mouthO.visible = !!pose.mouthO;
   if (pose.mouthSmile > 0.5) {
-    mouth.scale.set(1.15, 1.45, 1);
+    mouth.scale.set(1.25 * pose.mouthTight, 1.55, 1);
     mouth.rotation.z = 0;
-    mouth.position.y = -0.24;
+    mouth.position.y = -0.22;
   } else if (pose.mouthSmile < -0.5) {
-    mouth.scale.set(1.05, 1.2, 1);
+    mouth.scale.set(1.1 * pose.mouthTight, 1.25, 1);
     mouth.rotation.z = Math.PI;
-    mouth.position.y = -0.3;
+    mouth.position.y = -0.32;
   } else if (pose.mouthSmile < 0) {
-    mouth.scale.set(0.95, 0.85, 1);
+    mouth.scale.set(pose.mouthTight, 0.75, 1);
     mouth.rotation.z = Math.PI;
     mouth.position.y = -0.28;
   } else {
-    mouth.scale.set(1, 1, 1);
-    mouth.rotation.z = emo === "thinking" ? 0.2 : 0;
+    mouth.scale.set(pose.mouthTight, 1, 1);
+    mouth.rotation.z = emo === "thinking" ? 0.22 : 0;
     mouth.position.y = -0.26;
   }
   [eyeL, eyeR].forEach((eye, i) => {
@@ -297,9 +299,11 @@ function setEmotion(name) {
     eye.userData.iris.scale.setScalar(s);
     eye.userData.pupil.scale.setScalar(s);
     const side = i === 0 ? -1 : 1;
-    eye.userData.brow.position.y = pose.browY;
+    const browY = i === 0 ? pose.browYL : pose.browYR;
+    const browRot = i === 0 ? pose.browRotL : pose.browRotR;
+    eye.userData.brow.position.y = browY;
     eye.userData.brow.position.x = side * pose.browIn;
-    eye.userData.brow.rotation.z = side * pose.browRot;
+    eye.userData.brow.rotation.z = browRot;
   });
 }
 
@@ -339,18 +343,18 @@ function animate(t) {
     setEmotion(emo);
   }
   const p = pose || POSES.neutral;
+  // Full sleep only when awake timer expired. Sleepy emotion keeps 70% lids while awake.
   const slumped = !state.awake;
-  const targetPitch = (slumped || emo === "sleepy") ? Math.max(p.headPitch, 0.42) : p.headPitch;
+  const targetPitch = slumped ? Math.max(p.headPitch, 0.48) : p.headPitch;
   const targetYaw = slumped ? p.headYaw * 0.5 : (state.listening && !state.speaking ? p.headYaw - 0.1 : p.headYaw);
   head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, targetPitch, 0.12);
   head.rotation.y = THREE.MathUtils.lerp(head.rotation.y, targetYaw, 0.12);
 
-  let lid = p.lidOpen;
-  if (slumped && emo === "sleepy") lid = Math.min(lid, 0.15);
+  let lid = slumped ? 0 : p.lidOpen;
   if (!slumped && emo !== "sleepy" && !state.speaking) {
     if (blinkT > nextBlink) {
       blinkClosed = true;
-      lid = 0;
+      lid = 0; // lids over complete eyes — never swap pupils-only vs full eyes
       if (blinkT > nextBlink + 0.14) {
         blinkClosed = false;
         blinkT = 0;
