@@ -4,5 +4,6 @@ server/__pycache__/
 server/**/__pycache__/
 server/debug/
 server/.env
+server/pet_dock.json
 .env*
 !.env.example

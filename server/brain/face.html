@@ -9,6 +9,7 @@
     margin: 0; padding: 0; width: 100%; height: 100%;
     overflow: hidden;
     background: transparent !important;
+    background-color: rgba(0,0,0,0) !important;
     font-family: "Segoe UI", system-ui, sans-serif;
     user-select: none;
     -webkit-user-select: none;
@@ -16,12 +17,12 @@
   #stage {
     position: relative;
     width: 100%; height: 100%;
-    background: transparent;
+    background: transparent !important;
   }
   #c {
     display: block;
     width: 100%; height: 100%;
-    background: transparent;
+    background: transparent !important;
   }
   #bubble {
     display: none;
@@ -43,7 +44,9 @@
   #menu {
     display: none;
     position: absolute;
-    min-width: 140px;
+    min-width: 168px;
+    max-height: 92%;
+    overflow: auto;
     padding: 4px;
     border-radius: 10px;
     background: rgba(22, 30, 42, 0.96);
@@ -54,24 +57,20 @@
     pointer-events: auto;
   }
   #menu.show { display: block; }
-  #menu button {
+  #menu button, #menu .sep {
     display: block; width: 100%;
     border: 0; background: transparent; color: inherit;
     text-align: left; padding: 7px 10px; border-radius: 7px;
     cursor: pointer; font: inherit;
   }
+  #menu .sep { opacity: 0.45; cursor: default; padding-top: 10px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
   #menu button:hover { background: rgba(110, 198, 255, 0.18); }
 </style>
 </head>
 <body>
   <div id="stage">
     <div id="bubble" aria-live="polite"></div>
-    <div id="menu" role="menu">
-      <button type="button" data-act="sleep">Sleep</button>
-      <button type="button" data-act="listen">Listen</button>
-      <button type="button" data-act="console">Open console</button>
-      <button type="button" data-act="quit">Quit face</button>
-    </div>
+    <div id="menu" role="menu"></div>
     <canvas id="c"></canvas>
   </div>
 <script type="importmap">
@@ -84,119 +83,238 @@
 <script type="module">
 import * as THREE from "three";
 
-const EMOTIONS = new Set(["neutral","happy","sad","angry","surprised","sleepy","thinking"]);
+const EMOTIONS = ["neutral","happy","sad","angry","surprised","sleepy","thinking"];
 const canvas = document.getElementById("c");
 const bubble = document.getElementById("bubble");
 const menu = document.getElementById("menu");
 
 let state = {
-  emotion: "sleepy", awake: false, listening: false, speaking: false,
+  emotion: "neutral", awake: true, listening: false, speaking: false,
   last_said: "", last_heard: "",
+  pet_monitor: 0, pet_corner: "bottom-right", monitors: 1,
 };
 let speakPhase = 0;
 let blinkT = 0;
 let nextBlink = 2.5;
 let swayT = 0;
+let blinkClosed = false;
+let pose = null; // current emotion pose targets
 
-const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, premultipliedAlpha: false });
+const renderer = new THREE.WebGLRenderer({
+  canvas, alpha: true, antialias: true, premultipliedAlpha: false,
+});
 renderer.setClearColor(0x000000, 0);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 50);
-camera.position.set(0, 0.15, 3.2);
+const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 50);
+camera.position.set(0, 0.05, 3.35);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-const key = new THREE.DirectionalLight(0xffffff, 1.05);
-key.position.set(2, 3, 4);
+scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+const key = new THREE.DirectionalLight(0xffffff, 1.1);
+key.position.set(2.2, 3.2, 4);
 scene.add(key);
-const fill = new THREE.DirectionalLight(0x88aaff, 0.35);
-fill.position.set(-2, 0.5, 2);
+const fill = new THREE.DirectionalLight(0x9ab6ff, 0.4);
+fill.position.set(-2.5, 0.4, 2.5);
 scene.add(fill);
 
 const root = new THREE.Group();
 scene.add(root);
 
-const shellMat = new THREE.MeshStandardMaterial({ color: 0xc5ceda, roughness: 0.35, metalness: 0.15 });
-const darkMat = new THREE.MeshStandardMaterial({ color: 0x1e2838, roughness: 0.5 });
-const accentMat = new THREE.MeshStandardMaterial({ color: 0x6ec6ff, emissive: 0x1a4060, roughness: 0.4 });
-const pupilMat = new THREE.MeshStandardMaterial({ color: 0x152030 });
-const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf4f7fb, roughness: 0.25 });
-const cheekMat = new THREE.MeshStandardMaterial({ color: 0xe8a090, transparent: true, opacity: 0 });
+// soft ground shadow (tiny, keeps cutout readable)
+const shadow = new THREE.Mesh(
+  new THREE.CircleGeometry(0.55, 24),
+  new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22 })
+);
+shadow.rotation.x = -Math.PI / 2;
+shadow.position.y = -1.15;
+root.add(shadow);
 
-// body
-const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 0.55, 8, 20), shellMat);
-body.position.y = -0.55;
+const shellMat = new THREE.MeshStandardMaterial({ color: 0xc8d2de, roughness: 0.38, metalness: 0.12 });
+const darkMat = new THREE.MeshStandardMaterial({ color: 0x243044, roughness: 0.45 });
+const accentMat = new THREE.MeshStandardMaterial({ color: 0x6ec6ff, emissive: 0x14324a, roughness: 0.4 });
+const irisMat = new THREE.MeshStandardMaterial({ color: 0x3d6ea8, roughness: 0.35 });
+const pupilMat = new THREE.MeshStandardMaterial({ color: 0x101820 });
+const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf7f4ea, roughness: 0.3 });
+const cheekMat = new THREE.MeshStandardMaterial({ color: 0xe8a090, transparent: true, opacity: 0 });
+const browMat = new THREE.MeshStandardMaterial({ color: 0x4a5568, roughness: 0.55 });
+
+const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.52, 0.5, 8, 20), shellMat);
+body.position.y = -0.58;
 root.add(body);
 
-// head
 const head = new THREE.Group();
-head.position.y = 0.45;
+head.position.y = 0.42;
 root.add(head);
-const skull = new THREE.Mesh(new THREE.SphereGeometry(0.72, 28, 20), shellMat);
-skull.scale.set(1, 0.95, 0.9);
+const skull = new THREE.Mesh(new THREE.SphereGeometry(0.7, 32, 24), shellMat);
+skull.scale.set(1.02, 0.96, 0.92);
 head.add(skull);
 
-const visor = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.62, 0.35), darkMat);
-visor.position.set(0, 0.05, 0.48);
-visor.geometry.translate(0, 0, 0);
-head.add(visor);
-
-// ears
 [-1, 1].forEach((s) => {
-  const ear = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.22, 4, 10), shellMat);
-  ear.position.set(s * 0.78, 0.0, 0);
-  ear.rotation.z = s * 0.15;
+  const ear = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.2, 4, 10), shellMat);
+  ear.position.set(s * 0.76, 0.02, 0);
+  ear.rotation.z = s * 0.12;
   head.add(ear);
 });
 
-// antenna
 const antenna = new THREE.Group();
-antenna.position.set(0, 0.78, 0);
+antenna.position.set(0, 0.76, 0);
 head.add(antenna);
-const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.28, 8), shellMat);
-stem.position.y = 0.14;
+const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.036, 0.26, 8), shellMat);
+stem.position.y = 0.13;
 antenna.add(stem);
-const tip = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 12), accentMat);
-tip.position.y = 0.32;
+const tip = new THREE.Mesh(new THREE.SphereGeometry(0.085, 14, 14), accentMat);
+tip.position.y = 0.3;
 antenna.add(tip);
 
-// eyes
-const eyes = new THREE.Group();
-eyes.position.set(0, 0.08, 0.55);
-head.add(eyes);
 function makeEye(x) {
   const g = new THREE.Group();
-  g.position.x = x;
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), whiteMat);
-  ball.scale.set(1, 1.1, 0.7);
-  g.add(ball);
-  const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 12), pupilMat);
-  pupil.position.z = 0.12;
+  g.position.set(x, 0.06, 0.62);
+  const sclera = new THREE.Mesh(new THREE.SphereGeometry(0.175, 20, 16), whiteMat);
+  sclera.scale.set(1, 1.05, 0.85);
+  g.add(sclera);
+  const iris = new THREE.Mesh(new THREE.SphereGeometry(0.095, 16, 12), irisMat);
+  iris.position.z = 0.1;
+  g.add(iris);
+  const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), pupilMat);
+  pupil.position.z = 0.155;
   g.add(pupil);
-  const lid = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), shellMat);
-  lid.rotation.x = Math.PI;
-  lid.position.y = 0.02;
-  lid.scale.set(1.05, 1, 1.05);
+  const shine = new THREE.Mesh(
+    new THREE.SphereGeometry(0.02, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  );
+  shine.position.set(-0.03, 0.04, 0.18);
+  g.add(shine);
+  // Upper lid: shell-colored half-sphere that drops over the full eye
+  const lidGeo = new THREE.SphereGeometry(0.19, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+  const lid = new THREE.Mesh(lidGeo, shellMat.clone());
+  lid.rotation.x = Math.PI; // dome opens upward when lifted
+  lid.position.set(0, 0.02, 0);
   g.add(lid);
-  g.userData = { pupil, lid, ball };
+  // Brow
+  const brow = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.035, 0.06), browMat);
+  brow.position.set(0, 0.24, 0.08);
+  g.add(brow);
+  g.userData = { sclera, iris, pupil, lid, brow, openY: 0.22, closedY: -0.02 };
   return g;
 }
-const eyeL = makeEye(-0.26);
-const eyeR = makeEye(0.26);
-eyes.add(eyeL, eyeR);
+const eyeL = makeEye(-0.28);
+const eyeR = makeEye(0.28);
+head.add(eyeL, eyeR);
 
-const cheekL = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 10), cheekMat);
-cheekL.position.set(-0.42, -0.18, 0.55);
+const cheekL = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 10), cheekMat);
+cheekL.position.set(-0.4, -0.2, 0.58);
 const cheekR = cheekL.clone();
-cheekR.position.x = 0.42;
+cheekR.position.x = 0.4;
 head.add(cheekL, cheekR);
 
-// mouth (thin torus segment approx via scaled sphere flattened)
-const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.025, 8, 20, Math.PI), darkMat);
-mouth.position.set(0, -0.22, 0.68);
+// Mouth: deformable torus arc (smile / frown / O via scale+rotation)
+const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.028, 10, 24, Math.PI), darkMat);
+mouth.position.set(0, -0.26, 0.66);
 mouth.rotation.x = Math.PI;
 head.add(mouth);
+const mouthO = new THREE.Mesh(
+  new THREE.TorusGeometry(0.07, 0.028, 10, 20),
+  darkMat
+);
+mouthO.position.set(0, -0.26, 0.68);
+mouthO.visible = false;
+head.add(mouthO);
+
+const POSES = {
+  neutral: {
+    tip: 0x6ec6ff, cheeks: 0, eyeScale: 1, lidOpen: 1,
+    browY: 0.24, browRot: 0, browIn: 0,
+    mouthSmile: 0, mouthO: false, lookX: 0, lookY: 0,
+    headPitch: 0, headYaw: 0, bounce: 0, antennaTwitch: 0.08,
+  },
+  happy: {
+    tip: 0x7dffb0, cheeks: 0.9, eyeScale: 1.02, lidOpen: 0.88,
+    browY: 0.26, browRot: -0.15, browIn: 0,
+    mouthSmile: 1, mouthO: false, lookX: 0, lookY: 0.02,
+    headPitch: -0.05, headYaw: 0, bounce: 0.06, antennaTwitch: 0.12,
+  },
+  sad: {
+    tip: 0x7aa0c8, cheeks: 0, eyeScale: 0.95, lidOpen: 0.55,
+    browY: 0.2, browRot: 0.35, browIn: 0.04,
+    mouthSmile: -1, mouthO: false, lookX: 0, lookY: -0.06,
+    headPitch: 0.22, headYaw: 0, bounce: 0, antennaTwitch: 0.03,
+  },
+  angry: {
+    tip: 0xff6b5a, cheeks: 0, eyeScale: 0.98, lidOpen: 0.75,
+    browY: 0.18, browRot: 0.45, browIn: 0.08,
+    mouthSmile: -0.35, mouthO: false, lookX: 0, lookY: 0.02,
+    headPitch: -0.08, headYaw: 0, bounce: 0, antennaTwitch: 0.05,
+  },
+  surprised: {
+    tip: 0xffe066, cheeks: 0.5, eyeScale: 1.28, lidOpen: 1.15,
+    browY: 0.32, browRot: -0.25, browIn: -0.02,
+    mouthSmile: 0, mouthO: true, lookX: 0, lookY: 0.04,
+    headPitch: -0.12, headYaw: 0, bounce: 0.02, antennaTwitch: 0.18,
+  },
+  sleepy: {
+    tip: 0x8a9bb0, cheeks: 0, eyeScale: 0.92, lidOpen: 0.28,
+    browY: 0.2, browRot: 0.1, browIn: 0,
+    mouthSmile: 0.15, mouthO: false, lookX: 0.02, lookY: -0.04,
+    headPitch: 0.38, headYaw: 0.08, bounce: 0, antennaTwitch: 0.02,
+  },
+  thinking: {
+    tip: 0xffc857, cheeks: 0, eyeScale: 1.0, lidOpen: 0.9,
+    browY: 0.28, browRot: -0.35, browIn: 0,
+    mouthSmile: 0.2, mouthO: false, lookX: 0.1, lookY: 0.03,
+    headPitch: 0.05, headYaw: -0.28, bounce: 0, antennaTwitch: 0.35,
+  },
+};
+
+function setEmotion(name) {
+  const emo = EMOTIONS.includes(name) ? name : "neutral";
+  pose = POSES[emo];
+  tip.material.color.setHex(pose.tip);
+  tip.material.emissive.setHex(emo === "thinking" ? 0x553300 : emo === "angry" ? 0x401010 : 0x14324a);
+  cheekMat.opacity = pose.cheeks;
+  mouth.visible = !pose.mouthO;
+  mouthO.visible = !!pose.mouthO;
+  if (pose.mouthSmile > 0.5) {
+    mouth.scale.set(1.15, 1.45, 1);
+    mouth.rotation.z = 0;
+    mouth.position.y = -0.24;
+  } else if (pose.mouthSmile < -0.5) {
+    mouth.scale.set(1.05, 1.2, 1);
+    mouth.rotation.z = Math.PI;
+    mouth.position.y = -0.3;
+  } else if (pose.mouthSmile < 0) {
+    mouth.scale.set(0.95, 0.85, 1);
+    mouth.rotation.z = Math.PI;
+    mouth.position.y = -0.28;
+  } else {
+    mouth.scale.set(1, 1, 1);
+    mouth.rotation.z = emo === "thinking" ? 0.2 : 0;
+    mouth.position.y = -0.26;
+  }
+  [eyeL, eyeR].forEach((eye, i) => {
+    const s = pose.eyeScale;
+    eye.userData.sclera.scale.set(s, s * 1.05, 0.85);
+    eye.userData.iris.scale.setScalar(s);
+    eye.userData.pupil.scale.setScalar(s);
+    const side = i === 0 ? -1 : 1;
+    eye.userData.brow.position.y = pose.browY;
+    eye.userData.brow.position.x = side * pose.browIn;
+    eye.userData.brow.rotation.z = side * pose.browRot;
+  });
+}
+
+function setLidAmount(amount) {
+  // 1 = fully open, 0 = fully closed over the eye
+  const a = Math.max(0, Math.min(1.2, amount));
+  [eyeL, eyeR].forEach((eye) => {
+    const y = eye.userData.closedY + (eye.userData.openY - eye.userData.closedY) * a;
+    eye.userData.lid.position.y = y;
+    // keep lid large enough to cover sclera when closing
+    eye.userData.lid.scale.set(1.05, 1.05, 1.05);
+  });
+}
+
+setEmotion("neutral");
 
 function resize() {
   const w = canvas.clientWidth || 220;
@@ -208,36 +326,6 @@ function resize() {
 resize();
 addEventListener("resize", resize);
 
-function applyEmotion(e) {
-  const emo = EMOTIONS.has(e) ? e : "neutral";
-  tip.material.color.setHex(
-    emo === "angry" ? 0xff6b5a : emo === "thinking" ? 0xffc857 : emo === "happy" ? 0x7dffb0 : 0x6ec6ff
-  );
-  tip.material.emissive.setHex(emo === "thinking" ? 0x664400 : 0x1a4060);
-  cheekMat.opacity = (emo === "happy" || emo === "surprised") ? 0.85 : 0;
-  const open = emo === "surprised" ? 1.25 : emo === "sleepy" ? 0.55 : 1.0;
-  eyeL.userData.ball.scale.y = open;
-  eyeR.userData.ball.scale.y = open;
-  const brow = emo === "angry" ? 0.06 : emo === "sad" ? -0.05 : 0;
-  eyeL.position.y = brow;
-  eyeR.position.y = brow;
-  mouth.scale.set(
-    emo === "surprised" ? 0.7 : 1,
-    emo === "happy" ? 1.3 : emo === "sad" ? 0.7 : 1,
-    1
-  );
-  mouth.rotation.z = emo === "thinking" ? 0.25 : 0;
-}
-
-function setLids(closed) {
-  const y = closed ? 0.02 : 0.16;
-  const s = closed ? 1.2 : 0.15;
-  [eyeL, eyeR].forEach((eye) => {
-    eye.userData.lid.position.y = y;
-    eye.userData.lid.scale.y = s;
-  });
-}
-
 function animate(t) {
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, (animate.prev ? t - animate.prev : 16) / 1000);
@@ -245,48 +333,59 @@ function animate(t) {
   swayT += dt;
   blinkT += dt;
 
-  const asleep = !state.awake || state.emotion === "sleepy";
-  applyEmotion(state.emotion);
+  const emo = state.emotion || "neutral";
+  if (!pose || animate._emo !== emo) {
+    animate._emo = emo;
+    setEmotion(emo);
+  }
+  const p = pose || POSES.neutral;
+  const slumped = !state.awake;
+  const targetPitch = (slumped || emo === "sleepy") ? Math.max(p.headPitch, 0.42) : p.headPitch;
+  const targetYaw = slumped ? p.headYaw * 0.5 : (state.listening && !state.speaking ? p.headYaw - 0.1 : p.headYaw);
+  head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, targetPitch, 0.12);
+  head.rotation.y = THREE.MathUtils.lerp(head.rotation.y, targetYaw, 0.12);
 
-  if (asleep && !state.speaking) {
-    root.rotation.z = THREE.MathUtils.lerp(root.rotation.z, 0.35, 0.08);
-    root.position.y = THREE.MathUtils.lerp(root.position.y, -0.35, 0.08);
-    head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, 0.45, 0.08);
-    setLids(true);
-  } else {
-    const sway = Math.sin(swayT * 1.4) * 0.04;
-    root.rotation.z = THREE.MathUtils.lerp(root.rotation.z, sway, 0.1);
-    root.position.y = THREE.MathUtils.lerp(root.position.y, Math.sin(swayT * 2.1) * 0.03, 0.1);
-    head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, 0, 0.1);
+  let lid = p.lidOpen;
+  if (slumped && emo === "sleepy") lid = Math.min(lid, 0.15);
+  if (!slumped && emo !== "sleepy" && !state.speaking) {
     if (blinkT > nextBlink) {
-      setLids(true);
-      if (blinkT > nextBlink + 0.12) {
-        setLids(false);
+      blinkClosed = true;
+      lid = 0;
+      if (blinkT > nextBlink + 0.14) {
+        blinkClosed = false;
         blinkT = 0;
-        nextBlink = 2.2 + Math.random() * 3.2;
+        nextBlink = 2.2 + Math.random() * 3.0;
       }
-    } else {
-      setLids(false);
     }
   }
+  setLidAmount(lid);
 
-  // listen lean / pupils
-  const lean = state.listening && state.awake && !state.speaking ? -0.12 : 0;
-  head.rotation.y = THREE.MathUtils.lerp(head.rotation.y, lean, 0.1);
-  const px = state.listening ? 0.03 : Math.sin(swayT * 0.7) * 0.02;
-  [eyeL, eyeR].forEach((eye) => {
-    eye.userData.pupil.position.x = THREE.MathUtils.lerp(eye.userData.pupil.position.x, px, 0.15);
-  });
-
-  // speak bounce + mouth
+  const sway = slumped ? 0.02 : 0.045;
+  const bounce = (!slumped && (p.bounce || state.speaking)) ? (p.bounce + (state.speaking ? 0.05 : 0)) : 0;
+  root.rotation.z = THREE.MathUtils.lerp(root.rotation.z, Math.sin(swayT * 1.3) * sway + (slumped ? 0.28 : 0), 0.1);
+  let y = Math.sin(swayT * 2.0) * 0.025;
+  if (bounce) y += Math.abs(Math.sin(swayT * 6)) * bounce;
   if (state.speaking) {
     speakPhase += dt * 14;
-    root.position.y += Math.abs(Math.sin(speakPhase)) * 0.012;
-    mouth.scale.y = 1.1 + Math.abs(Math.sin(speakPhase)) * 0.9;
-    mouth.scale.x = 0.85 + Math.abs(Math.cos(speakPhase * 0.8)) * 0.4;
+    y += Math.abs(Math.sin(speakPhase)) * 0.014;
+    if (!p.mouthO) {
+      mouth.scale.y = (p.mouthSmile > 0.5 ? 1.45 : 1) * (1.05 + Math.abs(Math.sin(speakPhase)) * 0.55);
+    } else {
+      mouthO.scale.setScalar(1 + Math.abs(Math.sin(speakPhase)) * 0.25);
+    }
   }
+  root.position.y = THREE.MathUtils.lerp(root.position.y, slumped ? -0.28 : y, 0.12);
 
-  antenna.rotation.z = Math.sin(swayT * 3) * 0.08;
+  const lookX = p.lookX + (state.listening ? 0.04 : Math.sin(swayT * 0.6) * 0.015);
+  const lookY = p.lookY;
+  [eyeL, eyeR].forEach((eye) => {
+    eye.userData.pupil.position.x = THREE.MathUtils.lerp(eye.userData.pupil.position.x, lookX, 0.15);
+    eye.userData.pupil.position.y = THREE.MathUtils.lerp(eye.userData.pupil.position.y, lookY, 0.15);
+    eye.userData.iris.position.x = eye.userData.pupil.position.x * 0.7;
+    eye.userData.iris.position.y = eye.userData.pupil.position.y * 0.7;
+  });
+
+  antenna.rotation.z = Math.sin(swayT * (3 + p.antennaTwitch * 8)) * p.antennaTwitch;
   renderer.render(scene, camera);
   reportHitRect();
 }
@@ -294,15 +393,10 @@ requestAnimationFrame(animate);
 
 function reportHitRect() {
   if (!window.pywebview?.api?.update_hit_rect) return;
-  // Approximate pet as center ellipse in the canvas
   const r = canvas.getBoundingClientRect();
-  const padX = r.width * 0.18;
-  const padY = r.height * 0.12;
-  const left = r.left + padX;
-  const top = r.top + padY;
-  const right = r.right - padX;
-  const bottom = r.bottom - padY * 0.6;
-  window.pywebview.api.update_hit_rect(left, top, right, bottom);
+  const padX = r.width * 0.2;
+  const padY = r.height * 0.14;
+  window.pywebview.api.update_hit_rect(r.left + padX, r.top + padY, r.right - padX, r.bottom - padY * 0.55);
 }
 
 async function poll() {
@@ -310,13 +404,18 @@ async function poll() {
     const r = await fetch("/status", { cache: "no-store" });
     if (!r.ok) return;
     const s = await r.json();
+    const next = s.emotion || "neutral";
+    if (next !== state.emotion) setEmotion(next);
     state = {
-      emotion: s.emotion || "neutral",
+      emotion: next,
       awake: !!s.awake,
       listening: !!s.listening,
       speaking: !!s.speaking,
       last_said: s.last_said || "",
       last_heard: s.last_heard || "",
+      pet_monitor: s.pet_monitor ?? 0,
+      pet_corner: s.pet_corner || "bottom-right",
+      monitors: s.pet_monitors ?? 1,
     };
   } catch (_) {}
 }
@@ -326,22 +425,36 @@ poll();
 async function api(action, payload = {}) {
   await fetch("/api/" + action, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Rocky-Console": "1",
-    },
+    headers: { "Content-Type": "application/json", "X-Rocky-Console": "1" },
     body: JSON.stringify(payload),
   });
+}
+
+function buildMenu() {
+  const parts = [
+    `<button type="button" data-act="sleep">${state.awake ? "Sleep" : "Wake"}</button>`,
+    `<button type="button" data-act="listen">${state.listening ? "Stop listen" : "Listen"}</button>`,
+    `<button type="button" data-act="console">Open console</button>`,
+    `<button type="button" data-act="quit">Quit face</button>`,
+    `<div class="sep">Monitor</div>`,
+  ];
+  const n = Math.max(1, state.monitors | 0);
+  for (let i = 0; i < n; i++) {
+    const mark = i === state.pet_monitor ? " ✓" : "";
+    parts.push(`<button type="button" data-act="monitor" data-n="${i}">Send to monitor ${i}${mark}</button>`);
+  }
+  parts.push(`<div class="sep">Corner</div>`);
+  for (const c of ["bottom-right", "bottom-left", "top-right", "top-left"]) {
+    const mark = c === state.pet_corner ? " ✓" : "";
+    parts.push(`<button type="button" data-act="corner" data-c="${c}">${c}${mark}</button>`);
+  }
+  menu.innerHTML = parts.join("");
 }
 
 canvas.addEventListener("click", (ev) => {
   menu.classList.remove("show");
   const text = (state.last_said || "").replace(/\s+/g, " ").trim();
-  if (!text) {
-    bubble.textContent = state.awake ? "…" : "(sleeping)";
-  } else {
-    bubble.textContent = text.slice(0, 220);
-  }
+  bubble.textContent = text || (state.awake ? "…" : "(sleeping)");
   bubble.classList.add("show");
   clearTimeout(bubble._t);
   bubble._t = setTimeout(() => bubble.classList.remove("show"), 4500);
@@ -351,13 +464,10 @@ canvas.addEventListener("click", (ev) => {
 canvas.addEventListener("contextmenu", (ev) => {
   ev.preventDefault();
   bubble.classList.remove("show");
-  menu.style.left = Math.min(ev.clientX, innerWidth - 150) + "px";
-  menu.style.top = Math.min(ev.clientY, innerHeight - 140) + "px";
+  buildMenu();
+  menu.style.left = Math.min(ev.clientX, innerWidth - 180) + "px";
+  menu.style.top = Math.min(ev.clientY, innerHeight - 200) + "px";
   menu.classList.add("show");
-  const listenBtn = menu.querySelector('[data-act="listen"]');
-  listenBtn.textContent = state.listening ? "Stop listen" : "Listen";
-  const sleepBtn = menu.querySelector('[data-act="sleep"]');
-  sleepBtn.textContent = state.awake ? "Sleep" : "Wake";
 });
 
 document.addEventListener("click", () => menu.classList.remove("show"));
@@ -367,15 +477,17 @@ menu.addEventListener("click", async (ev) => {
   if (!btn) return;
   const act = btn.dataset.act;
   menu.classList.remove("show");
-  if (act === "sleep") {
-    await api("sleep", { on: !!state.awake });
-  } else if (act === "listen") {
-    await api("listen", { on: !state.listening });
-  } else if (act === "console") {
+  if (act === "sleep") await api("sleep", { on: !!state.awake });
+  else if (act === "listen") await api("listen", { on: !state.listening });
+  else if (act === "console") {
     if (window.pywebview?.api?.open_console) window.pywebview.api.open_console();
     else window.open("/", "_blank");
   } else if (act === "quit") {
     if (window.pywebview?.api?.quit_face) window.pywebview.api.quit_face();
+  } else if (act === "monitor") {
+    await api("pet_dock", { monitor: Number(btn.dataset.n), corner: state.pet_corner });
+  } else if (act === "corner") {
+    await api("pet_dock", { monitor: state.pet_monitor, corner: btn.dataset.c });
   }
 });
 </script>

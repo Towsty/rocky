@@ -7,6 +7,7 @@ short-lived child: ``python -m brain.face_pet <url>``.
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import subprocess
 import sys
@@ -14,12 +15,15 @@ import threading
 import time
 import webbrowser
 from ctypes import wintypes
+from pathlib import Path
 
 from . import config
 
 PET_W = 220
 PET_H = 260
 PET_MARGIN = 8
+_DOCK_FILE = Path(__file__).resolve().parent.parent / "pet_dock.json"
+_CORNERS = ("bottom-right", "bottom-left", "top-right", "top-left")
 
 _window = None
 _hwnd = 0
@@ -39,8 +43,116 @@ def console_url() -> str:
     return f"http://{host}:{config.LIVE_VIEW_PORT}/"
 
 
-def _work_area() -> tuple[int, int, int, int]:
-    """Primary monitor working area (excludes taskbar): left, top, right, bottom."""
+def _load_dock_file() -> dict:
+    try:
+        if _DOCK_FILE.is_file():
+            data = json.loads(_DOCK_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def save_dock(monitor: int | None = None, corner: str | None = None) -> dict:
+    """Update in-memory config + pet_dock.json (+ best-effort .env keys)."""
+    if monitor is not None:
+        config.PET_MONITOR = max(0, int(monitor))
+    if corner is not None:
+        c = corner.strip().lower().replace("_", "-")
+        if c in _CORNERS:
+            config.PET_CORNER = c
+    data = {"monitor": int(config.PET_MONITOR), "corner": config.PET_CORNER}
+    try:
+        _DOCK_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    except OSError as e:
+        print(f"face: could not write pet_dock.json ({e})")
+    _persist_env_dock(data["monitor"], data["corner"])
+    return data
+
+
+def _persist_env_dock(monitor: int, corner: str) -> None:
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.is_file():
+        return
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    out: list[str] = []
+    seen_m = seen_c = False
+    for line in lines:
+        if line.startswith("PET_MONITOR="):
+            out.append(f"PET_MONITOR={monitor}")
+            seen_m = True
+        elif line.startswith("PET_CORNER="):
+            out.append(f"PET_CORNER={corner}")
+            seen_c = True
+        else:
+            out.append(line)
+    if not seen_m:
+        out.append(f"PET_MONITOR={monitor}")
+    if not seen_c:
+        out.append(f"PET_CORNER={corner}")
+    try:
+        env_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def apply_saved_dock() -> None:
+    """Load pet_dock.json over env defaults (file wins for live moves)."""
+    data = _load_dock_file()
+    if "monitor" in data:
+        try:
+            config.PET_MONITOR = max(0, int(data["monitor"]))
+        except (TypeError, ValueError):
+            pass
+    if "corner" in data:
+        c = str(data["corner"]).strip().lower().replace("_", "-")
+        if c in _CORNERS:
+            config.PET_CORNER = c
+
+
+def list_monitor_work_areas() -> list[tuple[int, int, int, int]]:
+    """Per-monitor work areas (excludes taskbar): (left, top, right, bottom)."""
+    if sys.platform != "win32":
+        return [_primary_work_area()]
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", wintypes.LONG),
+            ("top", wintypes.LONG),
+            ("right", wintypes.LONG),
+            ("bottom", wintypes.LONG),
+        ]
+
+    class MONITORINFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("rcMonitor", RECT),
+            ("rcWork", RECT),
+            ("dwFlags", wintypes.DWORD),
+        ]
+
+    monitors: list[tuple[int, int, int, int]] = []
+    MonitorEnumProc = ctypes.WINFUNCTYPE(
+        ctypes.c_int, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(RECT), wintypes.LPARAM
+    )
+
+    def _callback(hmon, hdc, lprect, lparam):  # noqa: ARG001
+        info = MONITORINFO()
+        info.cbSize = ctypes.sizeof(MONITORINFO)
+        if ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+            w = info.rcWork
+            monitors.append((int(w.left), int(w.top), int(w.right), int(w.bottom)))
+        return 1
+
+    ctypes.windll.user32.EnumDisplayMonitors(0, 0, MonitorEnumProc(_callback), 0)
+    return monitors or [_primary_work_area()]
+
+
+def _primary_work_area() -> tuple[int, int, int, int]:
     if sys.platform != "win32":
         return 0, 0, 1920, 1080
     SPI_GETWORKAREA = 0x0030
@@ -59,10 +171,20 @@ def _work_area() -> tuple[int, int, int, int]:
 
 
 def _pet_xy() -> tuple[int, int]:
-    left, top, right, bottom = _work_area()
-    x = right - PET_W - PET_MARGIN
-    y = bottom - PET_H - PET_MARGIN
-    return max(left, x), max(top, y)
+    apply_saved_dock()
+    areas = list_monitor_work_areas()
+    idx = min(max(0, int(config.PET_MONITOR)), len(areas) - 1)
+    left, top, right, bottom = areas[idx]
+    corner = config.PET_CORNER
+    if corner == "bottom-left":
+        x, y = left + PET_MARGIN, bottom - PET_H - PET_MARGIN
+    elif corner == "top-right":
+        x, y = right - PET_W - PET_MARGIN, top + PET_MARGIN
+    elif corner == "top-left":
+        x, y = left + PET_MARGIN, top + PET_MARGIN
+    else:  # bottom-right
+        x, y = right - PET_W - PET_MARGIN, bottom - PET_H - PET_MARGIN
+    return x, y
 
 
 def _resolve_hwnd(window) -> int:
@@ -162,7 +284,7 @@ class _PetApi:
 
 
 def _dock_and_chrome_loop() -> None:
-    """Keep pet on the bottom-right of the work area; click-through off the body."""
+    """Keep pet on the chosen monitor/corner work area; click-through off the body."""
     global _hwnd, _click_through
     while True:
         time.sleep(0.25)
@@ -203,8 +325,10 @@ def _dock_and_chrome_loop() -> None:
 def open_face_window() -> None:
     """Log face URL; spawn the desk-pet child process (no browser popup)."""
     global _proc
+    apply_saved_dock()
     url = face_url()
     print(f"face: {url}")
+    print(f"face: dock monitor={config.PET_MONITOR} corner={config.PET_CORNER}")
     if not config.OPEN_FACE:
         print("face: auto-open off (OPEN_FACE=0)")
         return
@@ -227,7 +351,7 @@ def open_face_window() -> None:
             )
             print(
                 f"face: desk pet {PET_W}x{PET_H} via pywebview sidecar "
-                f"(bottom-right above taskbar, pid={_proc.pid})",
+                f"(monitor {config.PET_MONITOR} {config.PET_CORNER}, pid={_proc.pid})",
                 flush=True,
             )
         except Exception as e:

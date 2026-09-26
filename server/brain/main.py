@@ -614,6 +614,9 @@ async def set_volume(level: float) -> None:
 def console_state() -> dict:
     """Extra fields for /status: everything the page shows beyond the camera."""
     now = time.time()
+    from . import face_window as fw
+    fw.apply_saved_dock()
+    monitors = fw.list_monitor_work_areas()
     return {
         "robot": robot_socket is not None,
         "listening": ears is not None,
@@ -631,6 +634,9 @@ def console_state() -> dict:
         "tracking_enabled": tracker.enabled if tracker is not None else False,
         "volume": speaker_volume,
         "tuning": {k: getattr(config, k) for k in TUNABLE},
+        "pet_monitor": int(config.PET_MONITOR),
+        "pet_corner": config.PET_CORNER,
+        "pet_monitors": len(monitors),
     }
 
 
@@ -658,6 +664,11 @@ async def _console_command(action: str, payload: dict) -> dict:
         if name not in config.EMOTIONS:
             raise ValueError(f"emotions: {', '.join(config.EMOTIONS)}")
         await send_to_robot({"type": "emotion", "name": name})
+        # Console / pet emotion picks should show immediately — wake unless sleepy.
+        if name == "sleepy":
+            awake_until = 0.0
+        else:
+            awake_until = time.time() + config.AWAKE_SECONDS
     elif action == "head":
         pan = _number(payload, "pan", -config.TRACK_PAN_LIMIT, config.TRACK_PAN_LIMIT)
         tilt = _number(payload, "tilt", config.TRACK_TILT_MIN, config.TRACK_TILT_MAX)
@@ -696,6 +707,13 @@ async def _console_command(action: str, payload: dict) -> dict:
         else:
             if ears is not None:
                 stop_listening()
+    elif action == "pet_dock":
+        from . import face_window as fw
+        mon = payload.get("monitor", config.PET_MONITOR)
+        corner = payload.get("corner", config.PET_CORNER)
+        data = fw.save_dock(monitor=int(mon), corner=str(corner))
+        print(f"face: dock -> monitor={data['monitor']} corner={data['corner']}")
+        return data
     elif action in ("say", "ask"):
         text = str(payload.get("text", "")).strip()
         if not text or len(text) > 300:

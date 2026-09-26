@@ -19,14 +19,17 @@ from .face_window import (
     _pet_xy,
     _resolve_hwnd,
     _style_tool_topmost,
+    apply_saved_dock,
     console_url,
 )
+from . import config
 from . import face_window as fw
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     url = argv[0] if argv else "http://127.0.0.1:8766/face"
+    apply_saved_dock()
     try:
         import webview
     except ImportError:
@@ -69,7 +72,11 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(target=_shown, daemon=True).start()
 
     threading.Thread(target=_dock_and_chrome_loop, daemon=True).start()
-    print(f"face: desk pet {PET_W}x{PET_H} via pywebview (bottom-right above taskbar)", flush=True)
+    print(
+        f"face: desk pet {PET_W}x{PET_H} via pywebview "
+        f"(monitor={config.PET_MONITOR} corner={config.PET_CORNER})",
+        flush=True,
+    )
     try:
         webview.start(gui="edgechromium")
     except Exception:

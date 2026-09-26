@@ -36,6 +36,40 @@ _SENTENCE_END = re.compile(r"(?<=[!?])\s+|(?<=[^.]\.)\s+")
 # everything after is `show`, never spoken by mouth.py.
 _SHOW_MARK = re.compile(r"(?:^|\n)\s*SHOW:\s*", re.I)
 
+
+def _clock_context_line() -> str:
+    """Short, not-spoken clock line so Rocky can answer “what time is it?”."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    tz_name = "America/Chicago"
+    now = None
+    try:
+        now = datetime.now().astimezone()
+        if now.tzinfo is not None:
+            # Prefer OS local zone name when available.
+            tz_name = getattr(now.tzinfo, "key", None) or tz_name
+    except Exception:
+        now = None
+    if now is None:
+        try:
+            now = datetime.now(ZoneInfo(tz_name))
+        except Exception:
+            now = datetime.now()
+            tz_name = "local"
+    # "three twenty" style for Rocky's short answers; also give 24h for clarity.
+    hour12 = now.strftime("%I").lstrip("0") or "12"
+    minute = now.strftime("%M")
+    ampm = now.strftime("%p").lower()
+    spoken = f"{hour12}:{minute} {ampm}"
+    weekday = now.strftime("%A")
+    return (
+        f"(context, not spoken: local clock is {weekday} {spoken}, "
+        f"timezone {tz_name}, iso {now.isoformat(timespec='minutes')}. "
+        f"You know the time from this line. You do not have a camera unless a picture is attached.)"
+    )
+
+
 # An action returns (text for the model, optional fresh camera JPEG).
 Action = Callable[[dict], tuple[str, bytes | None]]
 
@@ -179,6 +213,8 @@ class RobotBrain:
             return
 
         content: list[dict] = [{"type": "text", "text": question}]
+        # Local clock for questions like "what time is it?" (not spoken aloud).
+        content.insert(0, {"type": "text", "text": _clock_context_line()})
         if jpeg is not None:
             content.append({"type": "text", "text": "(Live picture from your camera, taken just now, because the question seems to be about what you can see. If it isn't, ignore the picture.)"})
             content.append(_image_part(jpeg))
