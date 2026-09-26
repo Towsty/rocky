@@ -16,6 +16,7 @@ from .face_window import (
     PET_W,
     _PetApi,
     _dock_and_chrome_loop,
+    _force_form_chroma,
     _pet_xy,
     _resolve_hwnd,
     _style_tool_topmost,
@@ -38,8 +39,8 @@ def main(argv: list[str] | None = None) -> int:
 
     x, y = _pet_xy()
     api = _PetApi()
-    # pywebview only accepts #RGB / #RRGGBB (not #RRGGBBAA). Transparency is
-    # the separate `transparent=True` flag — black is fully cleared on Windows.
+    # pywebview rejects #RRGGBBAA. Real cutout is chroma-key + transparent WebView
+    # (see face_window.CHROMA_KEY / face.html page background).
     window = webview.create_window(
         title="Rocky",
         url=url,
@@ -62,7 +63,12 @@ def main(argv: list[str] | None = None) -> int:
     def _shown() -> None:
         time.sleep(0.25)
         fw._hwnd = _resolve_hwnd(window)
+        _force_form_chroma(window)
         _style_tool_topmost(fw._hwnd)
+        try:
+            window.resize(PET_W, PET_H)
+        except Exception:
+            pass
         try:
             window.move(*_pet_xy())
         except Exception:
@@ -75,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
 
     threading.Thread(target=_dock_and_chrome_loop, daemon=True).start()
     print(
-        f"face: desk pet {PET_W}x{PET_H} via pywebview "
+        f"face: desk pet {PET_W}x{PET_H} cutout via pywebview "
         f"(monitor={config.PET_MONITOR} corner={config.PET_CORNER})",
         flush=True,
     )

@@ -19,9 +19,14 @@ from pathlib import Path
 
 from . import config
 
-PET_W = 220
-PET_H = 260
+# Tall enough for full head + antenna + soft contact shadow padding.
+PET_W = 280
+PET_H = 360
 PET_MARGIN = 8
+# WinForms/WebView2 cannot do true per-pixel #00000000 cutouts without a solid
+# letterbox. Chroma-key this color (also used as the HTML page background) so
+# wallpaper shows through while opaque WebGL pixels stay. Must not appear on Rocky.
+CHROMA_KEY = "#00FE01"
 _DOCK_FILE = Path(__file__).resolve().parent.parent / "pet_dock.json"
 _CORNERS = ("bottom-right", "bottom-left", "top-right", "top-left")
 
@@ -210,6 +215,40 @@ def _resolve_hwnd(window) -> int:
     return 0
 
 
+def _chroma_colorref() -> int:
+    """COLORREF (0x00bbggrr) for CHROMA_KEY."""
+    h = CHROMA_KEY.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return r | (g << 8) | (b << 16)
+
+
+def _apply_cutout(hwnd: int) -> None:
+    """Layered chroma-key so empty pixels are desktop, not a gray/black card."""
+    if not hwnd or sys.platform != "win32":
+        return
+    user32 = ctypes.windll.user32
+    GWL_EXSTYLE = -20
+    WS_EX_LAYERED = 0x00080000
+    LWA_COLORKEY = 0x00000001
+    style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    if not (style & WS_EX_LAYERED):
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
+    user32.SetLayeredWindowAttributes(hwnd, _chroma_colorref(), 255, LWA_COLORKEY)
+
+
+def _force_form_chroma(window) -> None:
+    """Match WinForms BackColor to the HTML chroma plate (keyed via Win32)."""
+    native = getattr(window, "native", None)
+    if native is None:
+        return
+    try:
+        from System.Drawing import ColorTranslator  # type: ignore
+
+        native.BackColor = ColorTranslator.FromHtml(CHROMA_KEY)
+    except Exception:
+        pass
+
+
 def _style_tool_topmost(hwnd: int) -> None:
     if not hwnd or sys.platform != "win32":
         return
@@ -229,6 +268,7 @@ def _style_tool_topmost(hwnd: int) -> None:
     style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
     style = (style | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TOPMOST) & ~WS_EX_APPWINDOW
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+    _apply_cutout(hwnd)
     user32.SetWindowPos(
         hwnd,
         HWND_TOPMOST,
@@ -253,6 +293,8 @@ def _set_click_through(hwnd: int, enabled: bool) -> None:
     else:
         style = (style | WS_EX_LAYERED) & ~WS_EX_TRANSPARENT
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+    # Style changes clear layered attrs — re-apply chroma cutout.
+    _apply_cutout(hwnd)
 
 
 class _PetApi:
@@ -295,11 +337,19 @@ def _dock_and_chrome_loop() -> None:
             if not _hwnd:
                 _hwnd = _resolve_hwnd(win)
                 if _hwnd:
+                    _force_form_chroma(win)
                     _style_tool_topmost(_hwnd)
             x, y = _pet_xy()
             try:
                 if abs(int(win.x) - x) > 2 or abs(int(win.y) - y) > 2:
                     win.move(x, y)
+            except Exception:
+                pass
+            try:
+                # Keep docked size if DPI/scale drifted.
+                if abs(int(win.width) - PET_W) > 4 or abs(int(win.height) - PET_H) > 4:
+                    win.resize(PET_W, PET_H)
+                    win.move(*_pet_xy())
             except Exception:
                 pass
             if _hwnd and sys.platform == "win32":
