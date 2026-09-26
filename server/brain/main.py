@@ -887,7 +887,7 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
     # Judge the follow-up window by when you STARTED talking, not by when
     # the transcript arrived — long sentences shouldn't time out.
     if not woke and started_at >= awake_until:
-        print(f"(heard, ignoring: {text})")
+        print(f"(asleep — say hey {config.ROBOT_NAME})")
         return
     print(f"{config.HUMAN_NAME}: {text}")
     eyes.last_heard = text

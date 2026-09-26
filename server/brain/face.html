@@ -403,7 +403,10 @@ function reportHitRect() {
   window.pywebview.api.update_hit_rect(r.left + padX, r.top + padTop, r.right - padX, r.bottom - padBot);
 }
 
+let pollInFlight = false;
 async function poll() {
+  if (pollInFlight) return;
+  pollInFlight = true;
   try {
     const r = await fetch("/status", { cache: "no-store" });
     if (!r.ok) return;
@@ -422,8 +425,9 @@ async function poll() {
       monitors: s.pet_monitors ?? 1,
     };
   } catch (_) {}
+  finally { pollInFlight = false; }
 }
-setInterval(poll, 200);
+setInterval(poll, 250);
 poll();
 
 async function api(action, payload = {}) {

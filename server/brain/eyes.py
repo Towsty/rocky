@@ -19,7 +19,9 @@ newest. A tiny HTTP server (standard library, its own thread) serves:
 
 from __future__ import annotations
 
+import errno
 import json
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -27,6 +29,35 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import config
+
+# Pet /status polls abort mid-write on reload, hide, click-through — not real failures.
+_CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+
+
+def _client_gone(exc: BaseException | None) -> bool:
+    if exc is None:
+        return False
+    if isinstance(exc, _CLIENT_GONE):
+        return True
+    if isinstance(exc, OSError):
+        if getattr(exc, "winerror", None) in (10053, 10054):
+            return True
+        if getattr(exc, "errno", None) in (
+            errno.EPIPE,
+            errno.ECONNRESET,
+            getattr(errno, "ECONNABORTED", -1),
+        ):
+            return True
+    return False
+
+
+class _QuietHTTPServer(ThreadingHTTPServer):
+    """Don't dump a traceback when the pet (or browser) drops /status."""
+
+    def handle_error(self, request, client_address) -> None:  # noqa: ARG002
+        if _client_gone(sys.exc_info()[1]):
+            return
+        super().handle_error(request, client_address)
 
 
 class Eyes:
@@ -105,6 +136,14 @@ class Eyes:
 
             def log_message(self, *args) -> None:  # keep the console quiet
                 pass
+
+            def handle_one_request(self) -> None:
+                try:
+                    super().handle_one_request()
+                except Exception as e:
+                    if _client_gone(e):
+                        return
+                    raise
 
             def _local(self) -> bool:
                 # A malicious web page can point its own domain at 127.0.0.1
@@ -187,20 +226,30 @@ class Eyes:
                     self._reply(404, "text/plain", b"not found")
 
             def _reply(self, code: int, ctype: str, body: bytes) -> None:
-                self.send_response(code)
-                self.send_header("Content-Type", ctype)
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("X-Content-Type-Options", "nosniff")  # robot-supplied bytes stay images
-                self.end_headers()
-                self.wfile.write(body)
+                try:
+                    self.send_response(code)
+                    self.send_header("Content-Type", ctype)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")  # robot-supplied bytes stay images
+                    self.end_headers()
+                    self.wfile.write(body)
+                except Exception as e:
+                    if _client_gone(e):
+                        return
+                    raise
 
             def _stream(self) -> None:
-                self.send_response(200)
-                self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("X-Content-Type-Options", "nosniff")
-                self.end_headers()
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.end_headers()
+                except Exception as e:
+                    if _client_gone(e):
+                        return
+                    raise
                 seq = -1
                 try:
                     while True:
@@ -213,10 +262,12 @@ class Eyes:
                         self.wfile.write(frame)
                         self.wfile.write(b"\r\n")
                         self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
+                except Exception as e:
+                    if _client_gone(e):
+                        return
+                    raise
 
-        server = ThreadingHTTPServer((bind, port), Handler)
+        server = _QuietHTTPServer((bind, port), Handler)
         server.daemon_threads = True
         threading.Thread(target=server.serve_forever, daemon=True).start()
 
